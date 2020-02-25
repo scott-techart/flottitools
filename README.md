@@ -1,2 +1,2 @@
-# skintools
-A collection of Maya skinning tools.
+# flottitools
+A collection of Maya tools.

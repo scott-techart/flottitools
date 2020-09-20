@@ -1,6 +1,5 @@
 import unittest
 
-
 class MayaTestCase(unittest.TestCase):
     """Initializes maya.standalone on initialization.
     This avoids import errors when importing this module outside of a Maya environment.
@@ -24,14 +23,14 @@ class MayaTestCase(unittest.TestCase):
         self.pm.delete(self.scene_nodes)
         self.pm.select(clear=True)
 
-    def create_tranform_node(self):
+    def create_transform_node(self):
         xform_node = self.pm.createNode('transform')
         self.scene_nodes.append(xform_node)
         return xform_node
 
     def create_joint(self, **joint_kwargs):
         joint = self.pm.joint(**joint_kwargs)
-        self.scene.nodes.append(joint)
+        self.scene_nodes.append(joint)
         return joint
 
     def create_cube(self, **cube_kwargs):

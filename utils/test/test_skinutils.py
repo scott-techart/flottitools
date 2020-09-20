@@ -1,5 +1,5 @@
 import flottitools.test as mayatest
-import skinning.skinutils as skinutils
+import flottitools.utils.skinutils as skinutils
 
 
 class TestGetSkinCluster(mayatest.MayaTestCase):

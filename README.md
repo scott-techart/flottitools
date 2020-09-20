@@ -26,3 +26,6 @@ Common Use-cases:
 > 1. Select one vertex that has the weight values you wish to copy and click "Sample Verts".
 > 2. Select the vertices you wish to have identical weights and click "Average".
 > (Applying the average of one vertex to multiple target vertices effectively copies the skin weight data of the sampled vertex to the target vertices.)
+
+## License
+[MIT](https://choosealicense.com/licenses/mit/)

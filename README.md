@@ -3,12 +3,13 @@ A collection of Maya tools.
 
 ## Installation
 Open a new scene in Maya and drag the named "drag_to_maya_scene_setup.py" into the Maya scene viewport.
-
 A new shelf titled "FlottiTools" should appear in your Maya shelves bar.
+![Alt](/docs/averageweights_install.gif "Install .gif")
 
 ## Usage
 ### Average Weights
 This tool assists with polishing skin weighting quickly and cleanly.
+![Alt](/docs/averageweights_demo_short.gif "Install .gif")
 It will average the weight values of the user-selected sampled vertices and apply those values to the user-selected target vertices.
 Average weights by Proximity will weight the average skin-weight values for each target vertex based on its distance in bind-bose in worldspace to the sampled vertices.
 

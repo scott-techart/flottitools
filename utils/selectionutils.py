@@ -1,4 +1,16 @@
+from contextlib import contextmanager
+
 import pymel.core as pm
+
+
+@contextmanager
+def preserve_selection():
+    """Store user's selection on enter and restore user's selection on exit."""
+    sel = pm.selected(fl=True)
+    try:
+        yield
+    finally:
+        pm.select(sel, replace=True)
 
 
 def convert_selection_to_verts(sel=None):

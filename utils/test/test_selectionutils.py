@@ -1,8 +1,8 @@
-import flottitools.test as flottitest
+import flottitools.test as mayatest
 import flottitools.utils.selectionutils as su
 
 
-class TestConvertSelectionToVerts(flottitest.MayaTestCase):
+class TestConvertSelectionToVerts(mayatest.MayaTestCase):
     def make_and_get_cube_and_verts(self):
         test_cube = self.create_cube()
         self.pm.select(test_cube.vtx, replace=True)
@@ -39,3 +39,15 @@ class TestConvertSelectionToVerts(flottitest.MayaTestCase):
 
         result = su.convert_selection_to_verts()
         self.assertListEqual(result, expected_verts)
+
+
+class TestPreserveSelection(mayatest.MayaTestCase):
+    def test_preserves_selection(self):
+        test_cube1 = self.create_cube()
+        test_cube2 = self.create_cube()
+        self.pm.select(test_cube1, replace=True)
+        self.assertEqual(test_cube1, self.pm.selected()[0])
+        with su.preserve_selection():
+            self.pm.select(test_cube2, replace=True)
+            self.assertEqual(test_cube2, self.pm.selected()[0])
+        self.assertEqual(test_cube1, self.pm.selected()[0])

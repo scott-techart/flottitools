@@ -2,8 +2,7 @@ import pymel.core as pm
 
 
 def get_all_materials_in_scene():
-    # return pm.ls(type=pm.nt.ShadingDependNode)
-    return pm.ls(materials=True)
+    return pm.ls(mat=True)
 
 
 def get_used_materials_in_scene():
@@ -12,6 +11,13 @@ def get_used_materials_in_scene():
         if shading_engine.members():
             used_materials.extend(shading_engine.surfaceShader.listConnections())
     return used_materials
+
+
+def get_materials_assigned_to_nodes(nodes):
+    shape_nodes = pm.ls(nodes, dag=True, shapes=True)
+    shading_engine_nodes = pm.listConnections(shape_nodes, type='shadingEngine')
+    materials = pm.ls(pm.listConnections(shading_engine_nodes), materials=True)
+    return materials
 
 
 def create_material(mat_name, mat_type='lambert'):

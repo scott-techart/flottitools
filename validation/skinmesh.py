@@ -1,5 +1,6 @@
 import pymel.core as pm
 
+import flottitools.utils.skeletonutils as skelutils
 import flottitools.utils.skinutils as skinutils
 import flottitools.utils.transformutils as xformutils
 
@@ -93,7 +94,7 @@ def get_extra_skeleton_roots_from_scene(skinned_meshes=None, progress_bar=None):
         if progress_bar:
             progress_bar.update_label('Validating:  {0}'.format(skinned_mesh.name()))
         root_joint = skinutils.get_root_joint_from_skinned_mesh(skinned_mesh)
-        extra_roots = xformutils.get_extra_root_joints_from_root_joint(root_joint)
+        extra_roots = skelutils.get_extra_root_joints_from_root_joint(root_joint)
         if extra_roots:
             extra_skel_roots[skinned_mesh] = extra_roots
         if progress_bar:
@@ -112,3 +113,47 @@ def iterate_methods_per_vert(vertices, skin_cluster=None, methods=None, progress
         if progress_bar:
             new_text = '{0}  vtx[{1}]'.format(pbar_text, vert.index())
             progress_bar.update_label_and_iter_val(new_text)
+
+
+def get_dup_joint_names_from_scene(skinned_meshes=None):
+    skinned_meshes = skinned_meshes or skinutils.get_skinned_meshes_from_scene()
+    skinned_meshes_to_dup_joints = {}
+    for skinned_mesh in skinned_meshes:
+        root_joint = skinutils.get_root_joint_from_skinned_mesh(skinned_mesh)
+        skeleton = skelutils.get_hierarchy_from_root(root_joint, joints_only=True)
+        dup_named_joints = get_nodes_with_same_name_in_list(skeleton)
+        if dup_named_joints:
+            skinned_meshes_to_dup_joints[skinned_mesh] = dup_named_joints
+    return skinned_meshes_to_dup_joints
+
+
+def get_nodes_with_same_name_in_list(nodes):
+    short_names = [n.shortName() for n in nodes]
+    short_names_set = set(short_names)
+    if len(short_names) == len(short_names_set):
+        return []
+    dup_indices = find_duplicates_indices(short_names)
+    nodes_with_same_names = [nodes[i] for i in dup_indices]
+    return nodes_with_same_names
+
+
+def find_duplicates_indices(lst):
+    duplicates = []
+    seen = {}
+    for i, item in enumerate(lst):
+        if item in seen:
+            if seen[item] not in duplicates:
+                duplicates.append(seen[item])
+            duplicates.append(i)
+        else:
+            seen[item] = i
+    return duplicates
+
+
+def execute_methods_on_each_skin_mesh_in_scene(methods=None):
+    methods = methods or [skinutils.prune_exceeding_skinned_mesh, skinutils.normalize_skinned_mesh]
+    skinned_meshes = skinutils.get_skinned_meshes_from_scene()
+    for skinned_mesh in skinned_meshes:
+        for method in methods:
+            method(skinned_mesh)
+

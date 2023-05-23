@@ -1,3 +1,7 @@
+import os
+import pathlib
+import shutil
+import tempfile
 import unittest
 
 
@@ -61,9 +65,14 @@ class MayaTestCase(unittest.TestCase):
         self.scene_nodes.append(cube)
         return cube
 
-    def create_skinned_cube(self, joint_count=5, **skin_kwargs):
+    def create_sphere(self, **sphere_kwargs):
+        sphere = self.pm.polySphere(**sphere_kwargs)[0]
+        self.scene_nodes.append(sphere)
+        return sphere
+
+    def create_skinned_cube(self, joint_count=5, test_cube=None, **skin_kwargs):
         skin_kwargs.setdefault('maximumInfluences', 4)
-        test_cube = self.create_cube()
+        test_cube = test_cube or self.create_cube()
         test_joints = [self.create_joint(position=(i, i, i), absolute=True) for i in range(joint_count)]
         skin_cluster = self.pm.skinCluster(test_joints, test_cube, **skin_kwargs)
         self.scene_nodes.append(skin_cluster)
@@ -73,3 +82,35 @@ class MayaTestCase(unittest.TestCase):
         ns = self.pm.namespace(add=namespace)
         self.scene_namespaces.append(ns)
         return ns
+
+
+class MayaTempDirTestCase(MayaTestCase):
+    tmp_dir_root = None
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp_dir_root = pathlib.Path(tempfile.mkdtemp())
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp_dir_root, ignore_errors=False, onerror=onerror)
+
+
+def onerror(func, path, exc_info):
+    """
+    Error handler for ``shutil.rmtree``.
+
+    If the error is due to an access error (read only file)
+    it attempts to add write permission and then retries.
+
+    If the error is for another reason it re-raises the error.
+
+    Usage : ``shutil.rmtree(path, onerror=onerror)``
+    """
+    import stat
+    # Is the error an access error?
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+    else:
+        raise

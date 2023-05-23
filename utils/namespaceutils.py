@@ -41,7 +41,11 @@ def preserve_namespace(on_enter_namespace=None):
 
 
 def move_node_to_namespace(node, namespace):
-    node.rename('{0}:{1}'.format(namespace, node))
+    try:
+        node.rename('{0}:{1}'.format(namespace, node.nodeName(stripNamespace=True)))
+    except RuntimeError:
+        # read only needs cannot be renamed/moved to a different namespace and provoke a runtime error.
+        pass
 
 
 def move_nodes_to_namespace(nodes, namespace):
@@ -95,3 +99,14 @@ def get_namespace_as_pynode(namespace_string):
     if namespace:
         return namespace
     raise ValueError("Namespace '{}' does not exist.".format(namespace_string))
+
+
+def get_first_namespace_from_node(node):
+    # .longName() always returns root namespace as | instead of :
+    node_name = node.longName()
+    node_name = node_name.strip('|')
+    namespaces = node_name.split(':')
+    if len(namespaces) == 1:
+        return None
+    first_namespace = get_namespace_as_pynode(namespaces[0])
+    return first_namespace

@@ -36,6 +36,56 @@ class TestGetSkinCluster(mayatest.MayaTestCase):
         result = skinutils.get_skincluster(test_vert)
         self.assertEqual(test_skincluster, result)
 
+    def test_is_not_skinned(self):
+        test_cube = self.create_cube()
+        self.assertTrue(skinutils.is_not_skinned(test_cube))
+
+    def test_is_not_skinned_false(self):
+        test_cube, test_joints, skin_cluster = self.create_skinned_cube()
+        self.assertFalse(skinutils.is_not_skinned(test_cube))
+
+
+class TestGetSkinClusterWithReferences(mayatest.MayaTempDirTestCase):
+    def tearDown(self):
+        pm.newFile(force=True)
+
+    def test_referenced_skeleton(self):
+        [pm.joint() for _ in range(5)]
+        scene_path = self.tmp_dir_root.joinpath('foo3.ma')
+        pm.saveAs(scene_path, force=True)
+        pm.newFile()
+        pm.createReference(scene_path, returnNewNodes=True)
+        test_cube = self.create_cube()
+        test_joints = pm.ls(type=pm.nt.Joint)
+        expected = skinutils.bind_mesh_to_joints(test_cube, test_joints)
+        result = skinutils.get_skincluster(test_cube)
+        self.assertEqual(result, expected)
+
+    def test_referenced_skeleton_and_skinned_mesh(self):
+        self.create_skinned_cube()
+        scene_path = self.tmp_dir_root.joinpath('foo1.ma')
+        pm.saveAs(scene_path, force=True)
+        pm.newFile()
+        ref_nodes = pm.createReference(scene_path, returnNewNodes=True)
+        test_cube = [n for n in ref_nodes if n.type() == 'transform'][0]
+        expected = pm.ls(type=pm.nt.SkinCluster)[0]
+        result = skinutils.get_skincluster(test_cube)
+        self.assertEqual(result, expected)
+
+    def test_mesh_referenced_then_skinned(self):
+        test_cube = self.create_cube()
+        test_cube_name = test_cube.nodeName()
+        scene_path = self.tmp_dir_root.joinpath('foo2.ma')
+        pm.saveAs(scene_path, force=True)
+        pm.newFile()
+        ref_nodes = pm.createReference(scene_path, returnNewNodes=True)
+        test_cube = [n for n in ref_nodes if n.type() == 'transform'][0]
+        test_joints = [self.create_joint() for _ in range(5)]
+        skin_cluster = skinutils.bind_mesh_to_joints(test_cube, test_joints)
+        result = skinutils.get_skincluster(test_cube)
+        self.assertEqual(result, skin_cluster)
+        # test_joints = [self.create_joint(position=(i, i, i), absolute=True) for i in range(joint_count)]
+
 
 class TestBindMeshToJoints(mayatest.MayaTestCase):
     def setUp(self):
@@ -75,6 +125,54 @@ class TestBindMeshToJoints(mayatest.MayaTestCase):
         # skincl = skinutils.bind_mesh_geodesic_voxel(self.test_cube, self.test_joints, maximumInfluences=1)
         # self.assertIsNotNone(skincl)
         pass
+
+    def test_bind_to_similar_skeleton(self):
+        test_cube = self.create_cube()
+        test_ns = self.create_namespace('foo')
+        pm.namespace(set=test_ns)
+        source_cube, source_joints, source_cluster = self.create_skinned_cube()
+        pm.namespace(set=':')
+        skincl = skinutils.bind_mesh_to_similar_joints(source_cube, test_cube,
+                                                       source_skincluster=source_cluster, target_joints=self.test_joints)
+        self.assertIsNotNone(skincl)
+
+    def test_bind_to_similar_skeleton_get_target_joints_from_scene(self):
+        test_cube = self.create_cube()
+        test_ns = self.create_namespace('foo')
+        pm.namespace(set=test_ns)
+        source_cube, source_joints, source_cluster = self.create_skinned_cube()
+        pm.namespace(set=':')
+        skincl = skinutils.bind_mesh_to_similar_joints(source_cube, test_cube,
+                                                       source_skincluster=source_cluster)
+        self.assertIsNotNone(skincl)
+
+    def test_bind_to_similar_skeleton_get_target_joints_from_scene_extra_target_joints(self):
+        test_cube = self.create_cube()
+        extra_joints = [self.create_joint() for _ in range(5)]
+        test_ns = self.create_namespace('foo')
+        pm.namespace(set=test_ns)
+        source_cube, source_joints, source_cluster = self.create_skinned_cube()
+        pm.namespace(set=':')
+        skincl = skinutils.bind_mesh_to_similar_joints(source_cube, test_cube,
+                                                       source_skincluster=source_cluster)
+        expected = self.test_joints
+        result = skincl.getInfluence()
+        self.assertListEqual(expected, result)
+
+    def test_bind_to_similar_skeleton_extra_target_joints(self):
+        test_cube = self.create_cube()
+        extra_joints = [self.create_joint() for _ in range(5)]
+        test_ns = self.create_namespace('foo')
+        pm.namespace(set=test_ns)
+        source_cube, source_joints, source_cluster = self.create_skinned_cube()
+        pm.namespace(set=':')
+        skincl = skinutils.bind_mesh_to_similar_joints(source_cube, test_cube,
+                                                       source_skincluster=source_cluster,
+                                                       target_joints=self.test_joints)
+        expected = self.test_joints
+        result = skincl.getInfluence()
+        self.assertListEqual(expected, result)
+
 
 
 class TestGetVertsWithExceedingInfluences(mayatest.MayaTestCase):
@@ -207,7 +305,7 @@ class TestPruneExceedingInfluences(mayatest.MayaTestCase):
         test_joints = [self.create_joint() for _ in range(5)]
         skincl = skinutils.bind_mesh_to_joints(test_cube, test_joints, maximumInfluences=5)
         influences_to_weights = skinutils.get_weighted_influences(test_cube.vtx[0], skincl)
-        skinutils.prune_exceeding_influences(test_cube.vtx[0], skincl, influences_to_weights)
+        skinutils.prune_exceeding_influences_vertex(test_cube.vtx[0], skincl, influences_to_weights)
         result = skinutils.get_weighted_influences(test_cube.vtx[0], skincl)
         self.assertEqual(4, len(result))
 
@@ -256,23 +354,28 @@ class TestMoveWeights(mayatest.MayaTestCase):
             self.skincl, self.vert, q=True, transform=self.destination_inf)
 
     def test_move_weight_single_vert_expected_dest_weight(self):
-        # test_cube = self.create_cube()
-        # test_joints = [self.create_joint() for _ in range(5)]
-        # skincl = skinutils.bind_mesh_to_joints(test_cube, test_joints, maximumInfluences=4)
-        # vert = test_cube.vtx[0]
-        # origin_inf = test_joints[0]
-        # destination_inf = test_joints[1]
-        # initial_origin_weight = self.pm.skinPercent(skincl, vert, q=True, transform=origin_inf)
-        # initial_destination_weight = self.pm.skinPercent(skincl, vert, q=True, transform=destination_inf)
-        skinutils.move_weights(self.skincl, self.vert, self.origin_inf, self.destination_inf)
+        skinutils.move_weights_single_vert(self.skincl, self.vert, self.origin_inf, self.destination_inf)
         expected_dest_weight = self.initial_origin_weight + self.initial_destination_weight
         result_dest_weight = self.pm.skinPercent(self.skincl, self.vert, q=True, transform=self.destination_inf)
         self.assertEqual(expected_dest_weight, result_dest_weight)
 
     def test_single_vert_expected_origin_weight(self):
-        skinutils.move_weights(self.skincl, self.vert, self.origin_inf, self.destination_inf)
+        skinutils.move_weights_single_vert(self.skincl, self.vert, self.origin_inf, self.destination_inf)
         expected_origin_weight = 0.0
         result_origin_weight = self.pm.skinPercent(self.skincl, self.vert, q=True, transform=self.origin_inf)
+        self.assertEqual(expected_origin_weight, result_origin_weight)
+
+    def test_get_move_weight_data_expected_dest_weight(self):
+        infs_to_wts = skinutils.get_move_weights_data(self.skincl, self.vert, self.origin_inf, self.destination_inf)
+        expected_dest_weight = self.initial_origin_weight + self.initial_destination_weight
+        result_dest_weight = infs_to_wts.get(self.destination_inf, 0.0)
+        self.assertEqual(expected_dest_weight, result_dest_weight)
+
+    def test_get_move_weight_data_origin_weight(self):
+        infs_to_wts = skinutils.get_move_weights_data(self.skincl, self.vert, self.origin_inf, self.destination_inf)
+        expected_origin_weight = 0.0
+        # result_origin_weight = self.pm.skinPercent(self.skincl, self.vert, q=True, transform=self.origin_inf)
+        result_origin_weight = infs_to_wts.get(self.origin_inf, 0.0)
         self.assertEqual(expected_origin_weight, result_origin_weight)
 
 
@@ -732,5 +835,48 @@ class TestDuplicateSkinnedMesh(mayatest.MayaTestCase):
         self.assertEqual('foo', dup_root.parentNamespace())
 
 
+class TestSetWeights(mayatest.MayaTestCase):
+    def test_basic(self):
+        test_cube, test_joints, test_skincluster = self.create_skinned_cube(joint_count=2)
+        pm.skinPercent(test_skincluster, test_cube.vtx, transformValue=(test_joints[0], 1.0))
+        test_skincluster.forceNormalizeWeights()
+        verts_to_infs_wts = {0: {test_joints[1]: 1.0}}
+        skinutils.set_weights(verts_to_infs_wts, skinned_mesh=test_cube, skin_cluster=test_skincluster)
+        inf_values = pm.skinPercent(test_skincluster, test_cube.vtx[0], q=True, value=True)
+        self.assertListEqual([0.0, 1.0], inf_values)
+        inf_values = pm.skinPercent(test_skincluster, test_cube.vtx[1], q=True, value=True)
+        self.assertListEqual([1.0, 0.0], inf_values)
+
+    def test_more_complicated(self):
+        test_cube, test_joints, test_skincluster = self.create_skinned_cube()
+        pm.skinPercent(test_skincluster, test_cube.vtx, transformValue=(test_joints[0], 1.0))
+        test_skincluster.forceNormalizeWeights()
+        verts_to_infs_wts = {0: {test_joints[1]: 1.0},
+                             3: {test_joints[3]: 1.0},
+                             5: {test_joints[4]: 0.5, test_joints[0]: 0.5}}
+        skinutils.set_weights(verts_to_infs_wts, skinned_mesh=test_cube, skin_cluster=test_skincluster)
+        inf_values = pm.skinPercent(test_skincluster, test_cube.vtx[0], q=True, value=True)
+        self.assertListEqual([0.0, 1.0, 0.0, 0.0, 0.0], inf_values)
+        inf_values = pm.skinPercent(test_skincluster, test_cube.vtx[3], q=True, value=True)
+        self.assertListEqual([0.0, 0.0, 0.0, 1.0, 0.0], inf_values)
+        inf_values = pm.skinPercent(test_skincluster, test_cube.vtx[5], q=True, value=True)
+        self.assertListEqual([0.5, 0.0, 0.0, 0.0, 0.5], inf_values)
+
+    def test_raises_value_error_if_no_cluster_or_mesh(self):
+        verts_to_infs_wts = {0: {'foo': 1.0}}
+        self.assertRaises(ValueError, skinutils.set_weights, verts_to_infs_wts)
 
 
+
+class TestGetSkMeshFromSkinCl(mayatest.MayaTestCase):
+    def test_basic(self):
+        test_cube, test_joints, test_skincluster = self.create_skinned_cube()
+        result = skinutils.get_skinned_mesh_from_skin_cluster(test_skincluster)
+        self.assertEqual(test_cube, result)
+
+    def test_multiple_skinned_meshes(self):
+        test_cube, test_joints, test_skincluster = self.create_skinned_cube()
+        test_cube2 = self.create_cube()
+        test_cl2 = skinutils.bind_mesh_to_joints(test_cube2, test_joints)
+        result = skinutils.get_skinned_mesh_from_skin_cluster(test_skincluster)
+        self.assertEqual(test_cube, result)

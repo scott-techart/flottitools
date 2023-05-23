@@ -13,10 +13,11 @@ COPYSKIN_UI = None
 
 
 def copy_skin_launch():
+    global COPYSKIN_UI
     if COPYSKIN_UI:
         COPYSKIN_UI.deleteLater()
-    COPYSKIN_ui = CopySkinWeightsMayaWindow()
-    COPYSKIN_ui.show()
+    COPYSKIN_UI = CopySkinWeightsMayaWindow()
+    COPYSKIN_UI.show()
 
 
 class CopySkinWeightsMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
@@ -44,12 +45,14 @@ class CopySkinWeightsMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
                                      self.ui.surface_closestcomp_radio_button: self._copy_closest_component,
                                      self.ui.surface_uv_radio_button: self._copy_uv_space}
 
-        self.inf_index_to_method_map = {0: skelutils.update_inf_map_by_worldspace_position,
+        self.inf_index_to_method_map = {0: skelutils.update_inf_map_by_closest_inf,
                                         1: skelutils.update_inf_map_by_label,
-                                        2: skelutils.update_inf_map_by_name}
+                                        2: skelutils.update_inf_map_by_name,
+                                        3: None}
         self.inf_index_to_args_map = {0: 'closestJoint',
                                       1: 'label',
-                                      2: 'name'}
+                                      2: 'name',
+                                      3: None}
 
         self.ui.source_mesh_lineEdit.returnPressed.connect(self._source_line_edit)
         self.ui.source_mesh_button.clicked.connect(self._source_load_button_clicked)
@@ -228,11 +231,13 @@ class CopySkinWeightsMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
     def _get_inf_mapping_methods(self):
         indices = self._get_inf_indices()
         mapping_methods = [self.inf_index_to_method_map[i] for i in indices]
+        mapping_methods = [x for x in mapping_methods if x is not None]
         return mapping_methods
 
     def _get_inf_association_kwarg(self):
         indices = self._get_inf_indices()
         args = [self.inf_index_to_args_map[i] for i in indices]
+        args = [a for a in args if a is not None]
         inf_kwarg = {'influenceAssociation': args}
         return inf_kwarg
         # 'influenceAssociation': ('label', 'name', 'closestJoint')

@@ -1,9 +1,10 @@
 from contextlib import contextmanager
 
-import maya.OpenMaya as OpenMaya
-import maya.OpenMayaAnim as OpenMayaAnim
+import maya.api.OpenMaya as om
+import maya.api.OpenMayaAnim as omanim
 import pymel.core as pm
 
+import flottitools.utils.meshutils as meshutils
 import flottitools.utils.namespaceutils as nsutils
 import flottitools.utils.selectionutils as selutils
 import flottitools.utils.skeletonutils as skelutils
@@ -33,6 +34,8 @@ def get_skincluster(pynode):
     if not shape_node:
         return
     skin = shape_node.listHistory(type='skinCluster', future=False)
+    if not skin:
+        skin = shape_node.listHistory(type='skinCluster', future=True)
     try:
         return skin[0]
     except IndexError:
@@ -73,6 +76,19 @@ def bind_mesh_like_mesh(source_mesh, target_mesh, source_skincluster=None):
     source_skincluster = source_skincluster or get_skincluster(source_mesh)
     source_influences = source_skincluster.influenceObjects()
     return bind_mesh_to_joints(target_mesh, source_influences)
+
+
+def bind_mesh_to_similar_joints(source_mesh, target_mesh, source_skincluster=None, target_joints=None):
+    source_skincluster = source_skincluster or get_skincluster(source_mesh)
+    source_influences = source_skincluster.influenceObjects()
+    if not target_joints:
+        target_joints = pm.ls(type=pm.nt.Joint)
+        for source_influence in source_influences:
+            target_joints.remove(source_influence)
+    joint_pairs = meshutils.get_mesh_pairs_by_name(source_influences, target_joints)
+    # _, pruned_target_joints = zip(*joint_pairs)
+    pruned_target_joints = [jp[1] for jp in joint_pairs]
+    return bind_mesh_to_joints(target_mesh, pruned_target_joints)
 
 
 def bind_mesh_geodesic_voxel(mesh, joints, resolution=None, falloff=1.0, **skinCluster_kwargs):
@@ -138,7 +154,7 @@ def _get_skinned_meshes(nodes=None):
     return skinned_meshes
 
 
-def prune_exceeding_influences(vertex, skin_cluster=None, influences_to_weights=None, max_influences=4):
+def prune_exceeding_influences_vertex(vertex, skin_cluster=None, influences_to_weights=None, max_influences=4):
     skin_cluster = skin_cluster or get_skincluster(vertex)
     influences_to_weights = influences_to_weights or get_weighted_influences(vertex, skin_cluster)
     pruned_infs_to_weights = get_pruned_influences_to_weights(influences_to_weights, max_influences=max_influences)
@@ -147,12 +163,14 @@ def prune_exceeding_influences(vertex, skin_cluster=None, influences_to_weights=
 
 def prune_exceeding_skinned_mesh(skinned_mesh, vert_indexes_to_infs_and_wts=None, skincluster=None, max_influences=4):
     skincluster = skincluster or get_skincluster(skinned_mesh)
-    vert_indexes_to_infs_and_wts = vert_indexes_to_infs_and_wts or get_vert_indexes_with_exceeding_influences(skinned_mesh)
+    vert_indexes_to_infs_and_wts = vert_indexes_to_infs_and_wts or get_vert_indexes_with_exceeding_influences(
+        skinned_mesh)
     with max_influences_normalize_weights_disabled(skincluster, normalize_on_exit=True):
+        pruned_verts_to_infs_wts = {}
         for vert_index, infs_to_wts in vert_indexes_to_infs_and_wts.items():
-            vert = skinned_mesh.vtx[vert_index]
-            prune_exceeding_influences(
-                vert, skin_cluster=skincluster, influences_to_weights=infs_to_wts, max_influences=max_influences)
+            pruned_infs_to_weights = get_pruned_influences_to_weights(infs_to_wts, max_influences=max_influences)
+            pruned_verts_to_infs_wts[vert_index] = pruned_infs_to_weights
+        set_weights(pruned_verts_to_infs_wts, skinned_mesh=skinned_mesh, skin_cluster=skincluster)
 
 
 def get_pruned_influences_to_weights(influences_to_weights, max_influences=4, divisor=1.0):
@@ -201,10 +219,13 @@ def move_weight_and_remove_influence(influence_origin, influence_destination, sk
     pm.select(clear=True)
     skin_cluster.selectInfluenceVerts(influence_origin)
     bad_vertices = [x for x in pm.selected(fl=True) if isinstance(x, pm.MeshVertex)]
+    bad_vert_indices_to_infs_wts = {}
     if bad_vertices:
         for bad_vert in bad_vertices:
             # the transformMoveWeights flag in skinPercent does not quite work like you would expect so I wrote my own
-            move_weights(skin_cluster, bad_vert, influence_origin, influence_destination)
+            bad_vert_indices_to_infs_wts[bad_vert.index()] = get_move_weights_data(
+                skin_cluster, bad_vert, influence_origin, influence_destination)
+    set_weights(bad_vert_indices_to_infs_wts, skin_cluster=skin_cluster)
     skin_cluster.removeInfluence(influence_origin)
     return bad_vertices
 
@@ -214,15 +235,24 @@ def remove_influences_from_skincluster(skin_cluster, influences):
         skin_cluster.removeInfluence(influences)
 
 
-def move_weights(skin_cluster, vertex, origin_inf, destination_inf):
+def move_weights_single_vert(skin_cluster, vertex, origin_inf, destination_inf):
     """Sets origin_inf weight to 0.0 and adds its original weight to destination_inf."""
+    infs_to_weights = get_move_weights_data(skin_cluster, vertex, origin_inf, destination_inf)
+    pm.skinPercent(skin_cluster, vertex, transformValue=infs_to_weights.items())
+
+
+def get_move_weights_data(skin_cluster, vertex, origin_inf, destination_inf):
+    """
+    Returns an influences to weights dict for vertex
+    adds origin_inf weight value to destination_inf and sets origin_inf to 0.0
+    """
     infs_to_weights = get_weighted_influences(vertex, skin_cluster)
     initial_origin_weight = infs_to_weights.get(origin_inf, 0.0)
     initial_destination_weight = infs_to_weights.get(destination_inf, 0.0)
     destination_weight = initial_origin_weight + initial_destination_weight
     infs_to_weights[origin_inf] = 0.0
     infs_to_weights[destination_inf] = destination_weight
-    pm.skinPercent(skin_cluster, vertex, transformValue=infs_to_weights.items())
+    return infs_to_weights
 
 
 def normalize_skinned_meshes(skinned_meshes):
@@ -259,22 +289,42 @@ def duplicate_skinned_mesh_to_influences(skinned_mesh, influences, copy_skinning
         skincluster_duplicate = bind_method(skinned_mesh_duplicate, influences)
 
     if copy_skinning:
-        copy_weights(skinned_mesh, skinned_mesh_duplicate)
-        # copy_weights_vert_order(skinned_mesh, skinned_mesh_duplicate)
+        # copy_weights(skinned_mesh, skinned_mesh_duplicate)
+        copy_weights_vert_order(skinned_mesh, skinned_mesh_duplicate)
     return skinned_mesh_duplicate, skincluster_duplicate
 
 
-def duplicate_skinned_mesh_and_skeleton(skinned_mesh, dup_namespace=None, copy_skinning=True, bind_method=bind_mesh_to_joints, dup_parent=None):
-    skin_cluster = get_skincluster(skinned_mesh)
-    source_influences = skin_cluster.influenceObjects()
-    source_skeleton_root = skelutils.get_root_joint_from_child(source_influences[0])
+def duplicate_skinned_mesh_and_skeleton(skinned_mesh, dup_namespace=None, copy_skinning=True,
+                                        bind_method=bind_mesh_to_joints, dup_parent=None):
+    dup_meshes_roots_and_clusters = duplicate_skinned_meshes_and_skeleton(
+        [skinned_mesh], dup_namespace=dup_namespace, copy_skinning=copy_skinning,
+        bind_method=bind_method, dup_parent=dup_parent)
+    dup_mesh, dup_root, dup_cluster = dup_meshes_roots_and_clusters[0]
+    return dup_mesh, dup_root, dup_cluster
+
+
+def duplicate_skinned_meshes_and_skeleton(skinned_meshes, dup_namespace=None, copy_skinning=True,
+                                          bind_method=bind_mesh_to_joints, dup_parent=None):
+    root_to_skinned_meshes = {}
+    for skinned_mesh in skinned_meshes:
+        skin_cluster = get_skincluster(skinned_mesh)
+        source_influences = skin_cluster.influenceObjects()
+        source_skeleton_root = skelutils.get_root_joint_from_child(source_influences[0])
+        root_to_skinned_meshes.setdefault(source_skeleton_root, [])
+        root_to_skinned_meshes[source_skeleton_root].append(skinned_mesh)
     if dup_namespace:
         nsutils.add_namespace_to_root(dup_namespace)
-    dup_root = skelutils.duplicate_skeleton(source_skeleton_root, dup_namespace=dup_namespace, dup_parent=dup_parent)
-    dup_skel = skelutils.get_hierarchy_from_root(dup_root, joints_only=True)
-    dup_mesh, dup_cluster = duplicate_skinned_mesh_to_influences(skinned_mesh, dup_skel,
-                                                                 copy_skinning=copy_skinning, bind_method=bind_method, dup_namespace=dup_namespace, dup_parent=dup_parent)
-    return dup_mesh, dup_root, dup_cluster
+    dup_meshes_roots_and_clusters = []
+    for source_skeleton_root, source_skinned_meshes in root_to_skinned_meshes.items():
+        dup_root = skelutils.duplicate_skeleton(
+            source_skeleton_root, dup_namespace=dup_namespace, dup_parent=dup_parent)
+        dup_skel = skelutils.get_hierarchy_from_root(dup_root, joints_only=True)
+        for source_skinned_mesh in source_skinned_meshes:
+            dup_mesh, dup_cluster = duplicate_skinned_mesh_to_influences(
+                source_skinned_mesh, dup_skel, copy_skinning=copy_skinning, bind_method=bind_method,
+                dup_namespace=dup_namespace, dup_parent=dup_parent)
+            dup_meshes_roots_and_clusters.append((dup_mesh, dup_root, dup_cluster))
+    return dup_meshes_roots_and_clusters
 
 
 def apply_delta_mush(mesh, distanceWeight=1.0, displacement=1.0, **deltaMush_kwargs):
@@ -312,7 +362,8 @@ def bake_deformer_to_skin(source_mesh, target_mesh, source_skeleton=None, target
         # these cleanup operations are behind a feature flag because they are very slow, but effective.
         prune_exceeding_skinned_mesh(target_mesh, skincluster=target_skin_cluster, max_influences=max_influences)
         target_skin_cluster.forceNormalizeWeights()
-    pm.warning("Bake Deformer process complete. You should probably save your work and restart Maya now. This process takes tons of memory and does not give it back when it's done.")
+    pm.warning(
+        "Bake Deformer process complete. You should probably save your work and restart Maya now. This process takes tons of memory and does not give it back when it's done.")
     return target_skin_cluster
 
 
@@ -328,93 +379,22 @@ def copy_weights(source_mesh, target_nodes, **copySkinWeights_kwargs):
     pm.copySkinWeights(source_mesh, target_nodes, **default_copySkinWeightsKwargs)
 
 
+def copy_weights_uv_space(source_mesh, target_nodes, **copySkinWeights_kwargs):
+    #copySkinWeights - noMirror - surfaceAssociation closestPoint - uvSpace map1 map1 - influenceAssociation label - influenceAssociation name - influenceAssociation closestJoint - normalize;
+    copy_kwargs = {'surfaceAssociation': 'closestPoint'}
+    source_uvset = source_mesh.getCurrentUVSetName()
+    target_mesh = target_nodes
+    # for target_mesh in target_meshes:
+    target_uvset = target_mesh.getCurrentUVSetName()
+    copy_kwargs['uvSpace'] = (source_uvset, target_uvset)
+    copy_kwargs.update(copySkinWeights_kwargs)
+    copy_weights(source_mesh, target_mesh, **copy_kwargs)
+
+
 def get_root_joint_from_skinned_mesh(skinned_mesh):
     skin_cluster = get_skincluster(skinned_mesh)
     influences = skin_cluster.getInfluence()
     return skelutils.get_root_joint_from_child(influences[0])
-
-
-def get_vert_indexes_to_weighted_influences(skin_cluster, vertices=None):
-    """
-    Return a dictionary of vertex indices as keys and influence to weights dictionaries as values.
-    Only returns influences that have greater-than zero weights.
-
-    Original code from Tyler Thorncok https://www.charactersetup.com/tutorial_skinWeights.html
-    Tweaked to use PyNode influences and only check the vertices passed in (or all vertices if None).
-
-    :param skin_cluster: PyNode SkinCluster
-    :param vertices: PyNode MeshVertex Return weights for only the vertices provided.
-                     If None return values for all vertices.
-    :returns: {vert_index: {influence: weight_value}}
-    """
-    # poly mesh and skinCluster name
-    clusterName = skin_cluster.name()
-
-    # get the MFnSkinCluster for clusterName
-    selList = OpenMaya.MSelectionList()
-    selList.add(clusterName)
-    clusterNode = OpenMaya.MObject()
-    selList.getDependNode(0, clusterNode)
-    skinFn = OpenMayaAnim.MFnSkinCluster(clusterNode)
-
-    # get the MDagPath for all influence
-    infDags = OpenMaya.MDagPathArray()
-    skinFn.influenceObjects(infDags)
-
-    # Get PyNodes for influences. They are returned in the same order as the OpenMaya commands return influence indices.
-    # They have the advantage of containing more information like the influence name.
-    # Their index can be derived from the skinCluster using skin_cluster.indexForInfluenceObject(influence)
-    influences = skin_cluster.influenceObjects()
-    # need a influence index to influences mapping because influence indices can diverge from the order they come from
-    # skinCluster.influenceObjects() if methods like removeInfluence() have been used on the skinCluster before.
-    inf_index_to_infs = {}
-    for influence in influences:
-        inf_index = get_influence_index(influence, skin_cluster)
-        inf_index_to_infs[inf_index] = influence
-
-    # get the MPlug for the weightList and weights attributes
-    weight_list_plug = skinFn.findPlug('weightList')
-    weights_plug = skinFn.findPlug('weights')
-    wlAttr = weight_list_plug.attribute()
-    wAttr = weights_plug.attribute()
-    wInfIds = OpenMaya.MIntArray()
-
-    # the weights are stored in dictionary, the key is the vertId,
-    # the value is another dictionary whose key is the influence id and
-    # value is the weight for that influence
-    weights = {}
-    if vertices:
-        # get influences and weights for only the vertices passed in
-        vert_indices = [v.index() for v in vertices]
-    else:
-        # get influences and weights for all vertices affected by the skin_cluster
-        vert_indices = range(weight_list_plug.numElements())
-    for vId in vert_indices:
-        vWeights = {}
-        # tell the weights attribute which vertex id it represents
-        weights_plug.selectAncestorLogicalIndex(vId, wlAttr)
-        # get the indice of all non-zero weights for this vert
-        weights_plug.getExistingArrayAttributeIndices(wInfIds)
-        # create a copy of the current wPlug
-        infPlug = OpenMaya.MPlug(weights_plug)
-        for infId in wInfIds:
-            # tell the infPlug it represents the current influence id
-            infPlug.selectAncestorLogicalIndex(infId, wAttr)
-            # add this influence and its weight to this verts weights
-            if infPlug.asDouble() != 0.0:
-                try:
-                    influence = inf_index_to_infs[infId]
-                    vWeights[influence] = infPlug.asDouble()
-                except KeyError:
-                    # this is super weird Maya BS. It seems as though the weightList sometimes remembers the
-                    # weight values of influences that were removed from the skinCluster.
-                    # This results in a KeyError in our inf_index_to_infs dict.
-                    # I think we can safely catch and ignore these key errors and everything works as intended o.O
-                    pass
-
-        weights[vId] = vWeights
-
-    return weights
 
 
 def get_weighted_influences(vertex, skin_cluster=None):
@@ -440,18 +420,21 @@ def get_influence_index(influence, skin_cluster):
 def _copy_weights_vert_order(source_mesh, target_mesh, influence_map,
                             source_skincluster=None, target_skincluster=None):
     source_skincluster = source_skincluster or get_skincluster(source_mesh)
-    target_skincluster = target_skincluster or get_skincluster(target_mesh)
 
     verts_to_weighted_influences = get_vert_indexes_to_weighted_influences(source_skincluster)
-    pm.skinPercent(target_skincluster, target_mesh, normalize=False, pruneWeights=100)
+    target_verts_to_weighted_infs = {}
     for vert_index, weighted_infs in verts_to_weighted_influences.items():
-        target_vert = target_mesh.vtx[vert_index]
         target_weighted_infs = {}
         for source_inf, source_weight in weighted_infs.items():
             target_infs = influence_map.get(source_inf, [])
             for target_inf in target_infs:
-                target_weighted_infs[target_inf] = source_weight
-        pm.skinPercent(target_skincluster, target_vert, transformValue=target_weighted_infs.items())
+                current_weight = target_weighted_infs.get(target_inf, 0.0)
+                new_weight = current_weight + source_weight
+                target_weighted_infs[target_inf] = new_weight
+                # target_weighted_infs[target_inf] = source_weight
+        target_verts_to_weighted_infs[vert_index] = target_weighted_infs
+    set_weights(target_verts_to_weighted_infs, skinned_mesh=target_mesh, skin_cluster=target_skincluster)
+    return target_verts_to_weighted_infs
 
 
 def copy_weights_vert_order(source_mesh, target_mesh, influence_map=None, mapping_methods=None,
@@ -466,18 +449,18 @@ def copy_weights_vert_order(source_mesh, target_mesh, influence_map=None, mappin
                                                    source_skincluster, target_skincluster, inf_map)
     mapping_methods = mapping_methods or [skelutils.update_inf_map_by_label,
                                           skelutils.update_inf_map_by_name,
-                                          skelutils.update_inf_map_by_worldspace_position,
-                                          by_skin_cluster_index,
-                                          skelutils.update_inf_map_by_influence_order]
+                                          skelutils.update_inf_map_by_worldspace_position]
+                                          # by_skin_cluster_index,
+                                          # skelutils.update_inf_map_by_influence_order]
     if influence_map is None:
-        influence_map, unmapped_infs = skelutils.get_influence_map(source_influences,
-                                                                   target_influences,
-                                                                   mapping_methods)
-    _copy_weights_vert_order(source_mesh, target_mesh, influence_map, source_skincluster, target_skincluster)
+        influence_map, unmapped_target_infs, unmapped_source_infs = skelutils.get_influence_map(source_influences,
+                                                                                                target_influences,
+                                                                                                mapping_methods)
+    return _copy_weights_vert_order(source_mesh, target_mesh, influence_map, source_skincluster, target_skincluster)
 
 
 def copy_weights_vert_order_closest_joint(source_mesh, target_mesh, source_skincluster=None, target_skincluster=None):
-    copy_weights_vert_order(source_mesh, target_mesh,
+    return copy_weights_vert_order(source_mesh, target_mesh,
                             mapping_methods=[skelutils.update_inf_map_by_closest_inf],
                             source_skincluster=source_skincluster, target_skincluster=target_skincluster)
 
@@ -535,6 +518,170 @@ def duplicate_triangulate_mesh(skinned_mesh, dup_namespace=None, dup_parent=None
             skinned_mesh, dup_namespace=dup_namespace, dup_parent=dup_parent)[0]
         pm.polyTriangulate(dup_skinned_mesh_tri, ch=True)
         pm.delete(dup_skinned_mesh_tri, constructionHistory=True)
-        dup_skin_cluster = bind_mesh_like_mesh(skinned_mesh, dup_skinned_mesh_tri)
-        copy_weights(skinned_mesh, dup_skinned_mesh_tri)
+        dup_skin_cluster = None
+        if get_skincluster(skinned_mesh):
+            dup_skin_cluster = bind_mesh_like_mesh(skinned_mesh, dup_skinned_mesh_tri)
+            copy_weights_vert_order_inf_order(skinned_mesh, dup_skinned_mesh_tri)
+            # copy_weights(skinned_mesh, dup_skinned_mesh_tri)
     return dup_skinned_mesh_tri, dup_skin_cluster
+
+
+def get_vert_indexes_to_weighted_influences(skin_cluster, vertices=None):
+    """
+    Return a dictionary of vertex indices as keys and influence to weights dictionaries as values.
+    Only returns influences that have greater-than zero weights.
+
+    Original code from Tyler Thorncok https://www.charactersetup.com/tutorial_skinWeights.html
+    Tweaked to use PyNode influences and only check the vertices passed in (or all vertices if None).
+    Refactored to use latest OpenMaya API instead of the old one.
+
+    :param skin_cluster: PyNode SkinCluster
+    :param vertices: PyNode MeshVertex Return weights for only the vertices provided.
+                     If None return values for all vertices.
+    :returns: {vert_index: {influence: weight_value}}
+    """
+    skincl_depend_node = get_dagpath_or_dependnode_from_name(skin_cluster.name())
+    fn_skincl = omanim.MFnSkinCluster(skincl_depend_node)
+
+    # get the MDagPath for all influence
+    inf_dags = fn_skincl.influenceObjects()
+
+    # Get PyNodes for influences.
+    # They have the advantage of containing more information like the influence name.
+    # Their index can be derived from the skinCluster using skin_cluster.indexForInfluenceObject(influence)
+    influences = [pm.PyNode(inf_dag) for inf_dag in inf_dags]
+    # need a influence index to influences mapping because influence indices can diverge from the order they come from
+    # skinCluster.influenceObjects() if methods like removeInfluence() have been used on the skinCluster before.
+    inf_index_to_infs = {}
+    for influence in influences:
+        inf_index = get_influence_index(influence, skin_cluster)
+        inf_index_to_infs[inf_index] = influence
+
+    # get the MPlug for the weightList and weights attributes
+    weight_list_plug = fn_skincl.findPlug('weightList', True)
+    weights_plug = fn_skincl.findPlug('weights', True)
+    wlAttr = weight_list_plug.attribute()
+    wAttr = weights_plug.attribute()
+
+    # the weights are stored in dictionary, the key is the vertId,
+    # the value is another dictionary whose key is the influence id and
+    # value is the weight for that influence
+    vert_index_to_infs_wts = {}
+    if vertices:
+        # get influences and weights for only the vertices passed in
+        vert_indices = [v.index() for v in vertices]
+    else:
+        # get influences and weights for all vertices affected by the skin_cluster
+        vert_indices = range(weight_list_plug.numElements())
+    for vert_index in vert_indices:
+        infs_to_weights = {}
+        # tell the weights attribute which vertex id it represents
+        weights_plug.selectAncestorLogicalIndex(vert_index, wlAttr)
+        # get the indices of all non-zero weights for this vert
+        inf_indices = weights_plug.getExistingArrayAttributeIndices()
+        # create a copy of the current wPlug
+        # infPlug = OpenMaya.MPlug(weights_plug)
+        inf_plug = om.MPlug()
+        inf_plug.copy(weights_plug)
+        for inf_index in inf_indices:
+            # tell the infPlug it represents the current influence id
+            inf_plug.selectAncestorLogicalIndex(inf_index, wAttr)
+            # add this influence and its weight to this verts weights
+            if inf_plug.asDouble() != 0.0:
+                try:
+                    influence = inf_index_to_infs[inf_index]
+                    infs_to_weights[influence] = inf_plug.asDouble()
+                except KeyError:
+                    # this is super weird Maya BS. It seems as though the weightList sometimes remembers the
+                    # weight values of influences that were removed from the skinCluster.
+                    # This results in a KeyError in our inf_index_to_infs dict.
+                    # I think we can safely catch and ignore these key errors and everything works as intended o.O
+                    pass
+        vert_index_to_infs_wts[vert_index] = infs_to_weights
+    return vert_index_to_infs_wts
+
+
+def set_weights(vert_indices_to_infs_wts, skinned_mesh=None, skin_cluster=None):
+    """
+    :param vert_indices_to_infs_wts: {vert_index: {influence: 1.0}}
+    :param skinned_mesh: if None will be derived from the first vert in vert_indices_to_infs_wts
+    :param skin_cluster: if None will be derived from skinned_mesh
+    """
+    if skinned_mesh is None and skin_cluster is None:
+        raise ValueError('At least one of either skin_cluster or skinned_mesh must be provided.')
+    skinned_mesh = skinned_mesh or get_skinned_mesh_from_skin_cluster(skin_cluster)
+    skin_cluster = skin_cluster or get_skincluster(skinned_mesh)
+    mesh_path = get_dagpath_or_dependnode_from_name(skinned_mesh.getShape().name())
+    mesh_node = mesh_path.node()
+    skincl_depend_node = get_dagpath_or_dependnode_from_name(skin_cluster.name())
+    mfn_skincl = omanim.MFnSkinCluster(skincl_depend_node)
+
+    mfn_mesh_vert_iterator = om.MItMeshVertex(mesh_node)
+    indices = range(mfn_mesh_vert_iterator.count())
+
+    single_id_comp = om.MFnSingleIndexedComponent()
+    vertex_comp = single_id_comp.create(om.MFn.kMeshVertComponent)
+    single_id_comp.addElements(indices)
+
+    inf_dags = mfn_skincl.influenceObjects()
+    inf_indexes = om.MIntArray(len(inf_dags), 0)
+    for x in range(len(inf_dags)):
+        inf_indexes[x] = int(mfn_skincl.indexForInfluenceObject(inf_dags[x]))
+
+    '''
+    one-dimensional list of length (influence_count * component_count) so that the "weights" for one 
+    vertex is at the subset weight_list[this_vert_weight_index: this_vert_weight_index + inf_count]
+    '''
+    current_weight_data = mfn_skincl.getWeights(mesh_path, vertex_comp)[0]
+    new_weight_data = format_api_weight_data_from_dict(skin_cluster, vert_indices_to_infs_wts,
+                                                       current_weight_data=current_weight_data)
+
+    with pm.UndoChunk():
+        try:
+            # skinFn.setWeights() does not get added to the undo queue.
+            # However, we can trick Maya into adding it to the undo queue
+            # by wrapping it in an UndoChunk with and undoable command.
+            pm.skinPercent(skin_cluster, skinned_mesh, normalize=False, pruneWeights=0.0)
+            # set weights for all influences for all vertices in one call
+            mfn_skincl.setWeights(mesh_path, vertex_comp, inf_indexes, new_weight_data)
+        except RuntimeError:
+            # workaround for an error that I couldn't determine the cause of:
+            # RuntimeError: (kInvalidParameter): Object is incompatible with this method
+            for vert_index, infs_to_wts in vert_indices_to_infs_wts.items():
+                pm.skinPercent(skin_cluster, skinned_mesh.vtx[vert_index], transformValue=infs_to_wts.items())
+
+
+def get_dagpath_or_dependnode_from_name(name):
+    sellist = om.MGlobal.getSelectionListByName(name)
+    try:
+        return sellist.getDagPath(0)
+    except:
+        return sellist.getDependNode(0)
+
+
+def format_api_weight_data_from_dict(skin_cluster, verts_infs_wts_dict, current_weight_data=None):
+    infs = skin_cluster.influenceObjects()
+    infs_to_indices = dict([(inf, i) for i, inf in enumerate(infs)])
+    inf_length = len(infs)
+    current_weight_data = current_weight_data or [0.0] * (len(verts_infs_wts_dict.keys()) * inf_length)
+    new_weight_data = current_weight_data[:]
+    for vert, inf_wts in verts_infs_wts_dict.items():
+        vert_start = vert * inf_length
+        vert_end = vert_start + inf_length
+        weight_values = [0.0] * inf_length
+        for inf, weight in inf_wts.items():
+            index = infs_to_indices[inf]
+            weight_values[index] = weight
+        new_weight_data[vert_start:vert_end] = weight_values
+
+    return new_weight_data
+
+
+def get_skinned_mesh_from_skin_cluster(skin_cluster):
+    return skin_cluster.getGeometry()[0].getParent()
+
+
+def is_not_skinned(node):
+    if get_skincluster(node):
+        return False
+    return True

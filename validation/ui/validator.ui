@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1097</width>
-    <height>330</height>
+    <height>392</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -19,7 +19,7 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout_4">
+  <layout class="QVBoxLayout" name="verticalLayout_4" stretch="1,0">
    <property name="spacing">
     <number>6</number>
    </property>
@@ -80,7 +80,7 @@
             <x>0</x>
             <y>0</y>
             <width>538</width>
-            <height>256</height>
+            <height>301</height>
            </rect>
           </property>
           <property name="sizePolicy">
@@ -161,6 +161,41 @@
               </widget>
              </item>
              <item>
+              <widget class="QGroupBox" name="issues_staticmesh_groupBox">
+               <property name="title">
+                <string>Mesh Issues</string>
+               </property>
+               <property name="checkable">
+                <bool>true</bool>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+               <layout class="QVBoxLayout" name="verticalLayout_7">
+                <property name="spacing">
+                 <number>0</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QWidget" name="issues_staticmesh_viswidget" native="true">
+                  <layout class="QVBoxLayout" name="verticalLayout_11"/>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
               <widget class="QGroupBox" name="issues_materials_groupBox">
                <property name="title">
                 <string>Material Issues</string>
@@ -187,41 +222,6 @@
                 <item>
                  <widget class="QWidget" name="issues_materials_viswidget" native="true">
                   <layout class="QVBoxLayout" name="verticalLayout_10"/>
-                 </widget>
-                </item>
-               </layout>
-              </widget>
-             </item>
-             <item>
-              <widget class="QGroupBox" name="issues_staticmesh_groupBox">
-               <property name="title">
-                <string>Static Mesh Issues</string>
-               </property>
-               <property name="checkable">
-                <bool>true</bool>
-               </property>
-               <property name="checked">
-                <bool>false</bool>
-               </property>
-               <layout class="QVBoxLayout" name="verticalLayout_7">
-                <property name="spacing">
-                 <number>0</number>
-                </property>
-                <property name="leftMargin">
-                 <number>0</number>
-                </property>
-                <property name="topMargin">
-                 <number>0</number>
-                </property>
-                <property name="rightMargin">
-                 <number>0</number>
-                </property>
-                <property name="bottomMargin">
-                 <number>0</number>
-                </property>
-                <item>
-                 <widget class="QWidget" name="issues_staticmesh_viswidget" native="true">
-                  <layout class="QVBoxLayout" name="verticalLayout_11"/>
                  </widget>
                 </item>
                </layout>
@@ -597,15 +597,74 @@ s</string>
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="horizontalLayout">
+    <layout class="QVBoxLayout" name="verticalLayout_13">
      <property name="topMargin">
       <number>6</number>
      </property>
+     <item>
+      <widget class="QWidget" name="pbar_vis_widget" native="true">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
+        <property name="spacing">
+         <number>0</number>
+        </property>
+        <property name="leftMargin">
+         <number>0</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="rightMargin">
+         <number>0</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+       </layout>
+      </widget>
+     </item>
      <item>
       <widget class="QPushButton" name="validate_scene_button">
        <property name="text">
         <string>Validate Scene</string>
        </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QWidget" name="scene_extras_vis_widget" native="true">
+       <layout class="QHBoxLayout" name="horizontalLayout">
+        <property name="leftMargin">
+         <number>9</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="rightMargin">
+         <number>9</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+        <item>
+         <widget class="QPushButton" name="all_results_button">
+          <property name="text">
+           <string>Copy All Results to Clipboard</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="all_fix_button">
+          <property name="text">
+           <string>Fix All Fixable</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </widget>
      </item>
     </layout>

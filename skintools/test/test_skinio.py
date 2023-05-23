@@ -116,7 +116,8 @@ class TestImportSkinning(mayatest.MayaTestCase):
 
     def _create_tmp_skindata(self):
         test_cube, test_joints, test_skincluster = self.create_skinned_cube()
-        pm.skinPercent(test_skincluster, test_cube.vtx, transformValue=(test_joints[2], 1.0))
+        pm.skinPercent(test_skincluster, test_cube.vtx[:4], transformValue=(test_joints[2], 1.0))
+        pm.skinPercent(test_skincluster, test_cube.vtx[4:], transformValue=(test_joints[1], 1.0))
         self.skin_path = os.path.join(self.tmp_dir, 'test_skinning.ma')
         skinio.export_skinned_mesh(test_cube, self.skin_path)
         pm.delete(self.scene_nodes)
@@ -128,6 +129,50 @@ class TestImportSkinning(mayatest.MayaTestCase):
         expected = {test_joints[2]: 1.0}
         self.assertEqual(expected, result)
 
+    def test_best_guess_same_vert_order_different_positions_uses_vert_order(self):
+        test_cube = self.create_cube()
+        test_cube.scale.set(2, 2, 2)
+        pm.makeIdentity(test_cube, apply=True, scale=True, translate=True, rotate=True)
+        test_cube, test_joints, test_skincluster = self.create_skinned_cube(test_cube=test_cube)
+        skinio.import_skinning(test_cube, self.skin_path, copy_weights_method=skinio.SKINNING_METHOD_BEST_GUESS)
+        result = skinutils.get_weighted_influences(test_cube.vtx[0])
+        expected = {test_joints[2]: 1.0}
+        self.assertEqual(expected, result)
+        result = skinutils.get_weighted_influences(test_cube.vtx[4])
+        expected = {test_joints[1]: 1.0}
+        self.assertEqual(expected, result)
+
+    def test_best_guess_same_vert_count_different_vert_order(self):
+        # if we find a better way to compare vert order that doesn't depend on vert position
+        # this test's expected values should be updated
+        # Currently the copy method is expected to be worldspace.
+        # But with an ideal vert order check it would use vert order copy method.
+        test_cube = self.create_cube()
+        test_cube.scaleZ.set(-1)
+        pm.makeIdentity(test_cube, apply=True, scale=True, translate=True, rotate=True)
+        test_cube, test_joints, test_skincluster = self.create_skinned_cube(test_cube=test_cube)
+        skinio.import_skinning(test_cube, self.skin_path, copy_weights_method=skinio.SKINNING_METHOD_BEST_GUESS)
+        result = skinutils.get_weighted_influences(test_cube.vtx[0])
+        expected = {test_joints[2]: 1.0}
+        self.assertEqual(expected, result)
+        result = skinutils.get_weighted_influences(test_cube.vtx[4])
+        expected = {test_joints[1]: 1.0}
+        self.assertEqual(expected, result)
+
+    def test_best_guess_world_space(self):
+        test_cube = self.create_cube()
+        pm.polyMergeVertex(test_cube.vtx[2:5], d=100, am=1, ch=1)
+        pm.select(clear=True)
+        test_cube, test_joints, test_skincluster = self.create_skinned_cube(test_cube=test_cube)
+        skinio.import_skinning(test_cube, self.skin_path, copy_weights_method=skinio.SKINNING_METHOD_BEST_GUESS)
+        result = skinutils.get_weighted_influences(test_cube.vtx[0])
+        expected = {test_joints[2]: 1.0}
+        self.assertEqual(expected, result)
+        result = skinutils.get_weighted_influences(test_cube.vtx[2])
+        expected = {test_joints[1]: 0.5,
+                    test_joints[2]: 0.5}
+        self.assertEqual(expected, result)
+
     def test_cleans_up_after(self):
         test_cube, test_joints, test_skincluster = self.create_skinned_cube()
         expected_nodes = pm.ls(dagObjects=True)
@@ -137,6 +182,22 @@ class TestImportSkinning(mayatest.MayaTestCase):
         result_namespaces = pm.listNamespaces()
         self.assertListEqual(expected_nodes, result_nodes)
         self.assertListEqual(expected_namespaces, result_namespaces)
+
+    def test_imports_on_unskinned_meshes(self):
+        test_cube = self.create_cube()
+        test_joints = [self.create_joint(position=(i, i, i), absolute=True) for i in range(5)]
+        skinio.import_skinning_on_meshes_in_scene(self.skin_path, bind_unskinned=True)
+        result = skinutils.get_skincluster(test_cube)
+        self.assertIsNotNone(result)
+
+    def test_matching_joint_names_only(self):
+        test_cube = self.create_cube()
+        test_joints = [self.create_joint(position=(i, i, i), absolute=True) for i in range(7)]
+        skinio.import_skinning_on_meshes_in_scene(self.skin_path, bind_unskinned=True)
+        skin_cluster = skinutils.get_skincluster(test_cube)
+        result = skin_cluster.getInfluence()
+        expected = test_joints[:5]
+        self.assertListEqual(result, expected)
 
 
 class TestGetSkinDataPath(mayatest.MayaTestCase):

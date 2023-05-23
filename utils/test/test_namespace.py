@@ -21,6 +21,15 @@ class TestMoveNodesToNamespace(mayatest.MayaTestCase):
         namespaceutils.move_nodes_to_namespace(test_cubes, ns)
         [self.assertEqual(ns, x.parentNamespace()) for x in test_cubes]
 
+    def test_move_node_to_root_ns(self):
+        pm.namespace(set=':')
+        ns = self.create_namespace(':foo:bar')
+        test_cube = self.create_cube()
+        test_cube.rename(':foo:bar:pCube1')
+        self.assertEqual('foo:bar:', test_cube.namespace())
+        namespaceutils.move_node_to_namespace(test_cube, ':')
+        self.assertEqual('', test_cube.namespace())
+
 
 class TestPreserveNamespace(mayatest.MayaTestCase):
     def test_return_to_root(self):
@@ -232,3 +241,30 @@ class TestGetNamespacePynode(mayatest.MayaTestCase):
 
     def test_raises_value_error_if_ns_does_not_exist(self):
         self.assertRaises(ValueError, namespaceutils.get_namespace_as_pynode, 'foo')
+
+
+class TestGetNamespaceFromNode(mayatest.MayaTestCase):
+    def test_returns_first_ns(self):
+        test_ns = self.create_namespace('foo')
+        pm.namespace(set=test_ns)
+        test_cube_a = self.create_cube()
+        pm.namespace(set=':')
+        result = namespaceutils.get_first_namespace_from_node(test_cube_a)
+        self.assertEqual(result, test_ns)
+
+    def test_returns_first_ns_when_node_is_in_nested_ns(self):
+        test_ns = self.create_namespace('foo')
+        test_ns2 = self.create_namespace('foo:bar')
+        pm.namespace(set=test_ns2)
+        test_cube_a = self.create_cube()
+        pm.namespace(set=':')
+        result = namespaceutils.get_first_namespace_from_node(test_cube_a)
+        self.assertEqual(result, test_ns)
+
+    def test_reteurns_none_if_root_namespace(self):
+        test_ns = self.create_namespace('foo')
+        test_ns2 = self.create_namespace('foo:bar')
+        pm.namespace(set=':')
+        test_cube_a = self.create_cube()
+        result = namespaceutils.get_first_namespace_from_node(test_cube_a)
+        self.assertIsNone(result)

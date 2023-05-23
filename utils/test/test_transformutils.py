@@ -20,6 +20,12 @@ class TestGetWorldSpaceVector(mayatest.MayaTestCase):
         result = xformutils.get_worldspace_vector(testcube)
         self.assertEqual(result, om.MVector(1, 0, 0))
 
+    def test_mesh_vertex_object(self):
+        test_cube = self.create_cube()
+        expected = om.MVector(-0.5, -0.5, 0.5)
+        result = xformutils.get_worldspace_vector(test_cube.vtx[0])
+        self.assertEqual(result, expected)
+
 
 class TestMoveNodeToWorldspacePosition(mayatest.MayaTestCase):
     def test_move_node_to_worldspace_position(self):
@@ -111,35 +117,6 @@ class TestGetDistanceScalers(mayatest.MayaTestCase):
         result = xformutils.get_distance_scalers(source_vector, target_vectors)
         result = [round(r, 3) for r in result]
         self.assertListEqual(result, expected)
-
-
-class TestGetExtraRootJointsFromSkeleton(mayatest.MayaTestCase):
-    def test_returns_none_if_skeleton_has_one_root(self):
-        test_joints = [self.create_joint() for _ in range(5)]
-        result = xformutils.get_extra_root_joints_from_root_joint(test_joints[0])
-        self.assertListEqual([], result)
-
-    def test_returns_joint_if_not_parented_to_joint(self):
-        test_joints = [self.create_joint() for _ in range(5)]
-        test_node = self.create_transform_node()
-        test_node.setParent(test_joints[2])
-        test_joints[3].setParent(test_node)
-        result = xformutils.get_extra_root_joints_from_root_joint(test_joints[0])
-        self.assertEqual([test_joints[3]], result)
-
-    def test_multiple_extra_roots(self):
-        test_joints = [self.create_joint() for _ in range(10)]
-        test_nodes = [self.create_transform_node() for _ in range(3)]
-        test_nodes[0].setParent(test_joints[1])
-        test_nodes[1].setParent(test_joints[2])
-        test_nodes[2].setParent(test_joints[3])
-        test_joints[9].setParent(test_joints[3])
-        test_joints[7].setParent(test_nodes[0])
-        test_joints[5].setParent(test_nodes[1])
-        test_joints[4].setParent(test_nodes[2])
-        expected = [test_joints[4], test_joints[5], test_joints[7]]
-        result = xformutils.get_extra_root_joints_from_root_joint(test_joints[0])
-        self.assertListEqual(expected, result)
 
 
 class TestNodesAlmostMatchWorldspacePosition(mayatest.MayaTestCase):

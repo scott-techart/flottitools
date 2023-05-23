@@ -5,12 +5,15 @@ import PySide2.QtWidgets as QtWidgets
 import PySide2.QtCore as QtCore
 import PySide2.QtGui as QtGui
 
-import flottitools.validation.materials as val_mats
-import flottitools.validation.skinmesh as val_skmesh
-
+import flottitools.path_consts as path_consts
 import flottitools.ui as flottiui
 import flottitools.utils.materialutils as matutils
+import flottitools.utils.meshutils as meshutils
 import flottitools.utils.skinutils as skinutils
+import flottitools.validation.materials as val_mats
+import flottitools.validation.meshes as val_mesh
+import flottitools.validation.skinmesh as val_skmesh
+
 
 VALIDATOR_UI = None
 # categories
@@ -22,35 +25,46 @@ CATEGORY_MAT = 'materials'
 PRESET_ALL = 'All'
 PRESET_NONE = 'None'
 PRESET_MATERIALS_ONLY = 'Materials Only'
+PRESET_SKINNED_MESHES = 'Skinned Meshes'
+PRESET_MESHES = 'Meshes'
 
 # severity
 SEVERITY_ERROR = 0
 SEVERITY_WARNING = 1
+SEVERITY_PASS = 2
 
 # colors
-UNKNOWN_COLOR = 'indigo'
+COLOR_ERROR = 'maroon'
+COLOR_WARNING = 'darkgoldenrod'
+COLOR_PASS = 'green'
+COLOR_UNKNOWN = 'indigo'
+
 SEVERITY_COLOR_MAP = {
-    SEVERITY_ERROR: 'maroon',
-    SEVERITY_WARNING: 'darkgoldenrod',
-    None: 'indigo'
+    SEVERITY_ERROR: COLOR_ERROR,
+    SEVERITY_WARNING: COLOR_WARNING,
+    SEVERITY_PASS: COLOR_PASS,
+    None: COLOR_UNKNOWN
 }
 
 
-def validator_launch():
+def validator_launch(parent_to_notify=None, launch_hidden=False):
     global VALIDATOR_UI
     if VALIDATOR_UI:
         VALIDATOR_UI.deleteLater()
-    VALIDATOR_UI = ValidatorMayaWindow()
-    VALIDATOR_UI.show()
+    VALIDATOR_UI = ValidatorMayaWindow(parent_to_notify)
+    if not launch_hidden:
+        VALIDATOR_UI.show()
+    return VALIDATOR_UI
 
 
 class ValidatorMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
     window_title = "Validator"
     ui_designer_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'ui', 'validator.ui'))
 
-    def __init__(self):
+    def __init__(self, parent_to_notify=None):
         super(ValidatorMayaWindow, self).__init__()
         self.resize(0, 390)
+        self.parent_to_notify = parent_to_notify
         self.initialized_issues = []
         self.category_to_widget_map = {CATEGORY_SKMESH: self.ui.issues_skinnedmesh_viswidget,
                                        CATEGORY_MESH: self.ui.issues_staticmesh_viswidget,
@@ -61,48 +75,62 @@ class ValidatorMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
         self.issues = [ExceedingVertsIssueWidget,
                        NonNormalizedVertsIssueWidget,
                        ExceedingJointsIssueWidget,
-                       MediaNotInTexturePathsIssueWidget,
-                       ExtraRootJointsIssueWidget]
+                       ExtraRootJointsIssueWidget,
+                       JointsWithDuplicatedNamesIssueWidget,
+                       MissingUVsIssueWidget,
+                       MultipleShapeNodesIssueWidget,
+                       DirtyHistoryMeshIssueWidget,
+                       OverlappingVerticesIssueWidget,
+                       VertexColorIssueWidget]
+
+        self.ui.scene_extras_vis_widget.setVisible(False)
+        self.ui.pbar_vis_widget.setVisible(False)
+        self.ui.progress_bar = flottiui.ProgressBarWithLabel()
+        self.ui.pbar_vis_widget.layout().addWidget(self.ui.progress_bar)
 
         self._add_issues()
         self._init_presets()
         self._init_scene_nodes()
-
-        self.ui.validate_scene_button.clicked.connect(self.validate_scene)
-        # self.ui.issues_fix_all_pushButton.clicked.connect(self.fix_all)
-        self.ui.objects_refresh_button.clicked.connect(self.refresh_nodes_lists)
-        self.ui.objects_skipall_button.clicked.connect(self.blacklist_all_items)
-        self.ui.objects_skip_button.clicked.connect(self.blacklist_selected_items)
-        self.ui.objects_val_button.clicked.connect(self.whitelist_selected_items)
-        self.ui.presets_listWidget.itemSelectionChanged.connect(self.preset_selection_changed)
-
+        self._init_ui_connections()
         self._rotated_buttons_setup()
 
     def validate_scene(self):
+        progress_bars = [self.ui.progress_bar]
+        if self.parent_to_notify:
+            progress_bars.append(self.parent_to_notify.progress_bar)
         issues_to_validate = self._get_all_issues_to_validate()
-        [issue.validate_issue() for issue in issues_to_validate]
-        # self.refresh_buttons()
+        pm.waitCursor(state=True)
+        try:
+            self.ui.pbar_vis_widget.setVisible(True)
+            for pb in progress_bars:
+                pb.reset()
+                pb.set_maximum(len(issues_to_validate))
+            for issue in issues_to_validate:
+                for pb in progress_bars:
+                    pb.update_label_and_iter_val('Validating {}'.format(issue.label))
+                self._scroll_issues_to_issue(issue)
+                issue.validate_issue(update_parent_ui=False)
+            self.ui.pbar_vis_widget.setVisible(False)
+            self.update_ui_elements_based_on_issue_results()
+        except Exception as e:
+            pm.waitCursor(state=False)
+            raise e
+        pm.waitCursor(state=False)
 
     def fix_all(self):
-        issues_to_fix = self._get_dirty_issues()
+        issues_to_fix = [i for i in self.get_dirty_issues() if i.has_fix_method]
         [issue.fix_issue() for issue in issues_to_fix]
         self.validate_scene()
 
-    # def refresh_buttons(self, issues_to_fix=None):
-    #     issues_to_fix = issues_to_fix or self._get_dirty_issues()
-    #     if issues_to_fix:
-    #         self.ui.issues_fix_all_pushButton.setEnabled(True)
-    #         self.ui.issues_fix_all_pushButton.setStyleSheet("background-color: maroon")
-    #     else:
-    #         self.ui.issues_fix_all_pushButton.setEnabled(False)
-    #         self.ui.issues_fix_all_pushButton.setStyleSheet("background-color: light gray")
-
-    def refresh_nodes_lists(self):
+    def refresh_nodes_lists(self, white_list_nodes=None):
         all_val_nodes = self._get_all_nodes_to_validate()
-        self.nodes_whitelist = []
-        self.nodes_blacklist =[]
-        for node in all_val_nodes:
-            self.nodes_whitelist.append(node)
+        if white_list_nodes:
+            self.nodes_whitelist = white_list_nodes
+        else:
+            self.nodes_whitelist = []
+            self.nodes_blacklist =[]
+            for node in all_val_nodes:
+                self.nodes_whitelist.append(node)
 
         self._refresh_nodes_list_widgets()
 
@@ -114,11 +142,28 @@ class ValidatorMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
     def preset_selection_changed(self):
         selected_items = self.ui.presets_listWidget.selectedItems()
         selected_names = [x.text() for x in selected_items]
-        selected_preset_states = [self.preset_name_to_issue_state[n] for n in selected_names]
+        self.set_issue_checked_states_to_presets(selected_names)
+        self.refresh_nodes_lists()
+
+    def set_issue_checked_states_to_presets(self, preset_names):
+        selected_preset_states = [self.preset_name_to_issue_state[n] for n in preset_names]
         combined_selected_preset_states = [sum(x) for x in zip(*selected_preset_states)]
+        first_checked_issue = None
         for issue, val in zip(self.initialized_issues, combined_selected_preset_states):
             issue.ui.issue_checkBox.setChecked(val)
-        self.refresh_nodes_lists()
+            if first_checked_issue is None:
+                if val:
+                    first_checked_issue = issue
+        first_checked_issue = first_checked_issue or self.initialized_issues[0]
+        self._scroll_issues_to_issue(first_checked_issue)
+
+    def set_preset_selection(self, preset_names):
+        indices = [self.preset_names.index(x) for x in preset_names]
+        for i in range(self.ui.presets_listWidget.count()):
+            state = False
+            if i in indices:
+                state = True
+            self.ui.presets_listWidget.item(i).setSelected(state)
 
     def blacklist_selected_items(self):
         selected_whitelist_indexes = self.ui.objects_val_listWidget.selectedIndexes()
@@ -136,6 +181,63 @@ class ValidatorMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
         self._move_nodes_and_sort(self.nodes_blacklist, self.nodes_whitelist, selected_blacklist_indexes)
         self._refresh_nodes_list_widgets()
 
+    def set_parent_to_notify(self, parent_to_notify):
+        self.parent_to_notify = parent_to_notify
+
+    def update_ui_elements_based_on_issue_results(self):
+        dirty_issues = self.get_dirty_issues()
+        if not dirty_issues:
+            scroll_area_stylesheet = "QScrollArea {}"
+            self.ui.scrollArea.setStyleSheet(scroll_area_stylesheet)
+            self.ui.scene_extras_vis_widget.setVisible(False)
+            if not self._all_issues_not_checked_yet() and self.parent_to_notify:
+                self.parent_to_notify.update_validation_severity(SEVERITY_PASS)
+            return
+        self.ui.scene_extras_vis_widget.setVisible(True)
+        self._scroll_issues_to_issue(dirty_issues[0])
+
+        max_severity = SEVERITY_WARNING
+        for issue in dirty_issues:
+            if issue.severity == SEVERITY_ERROR:
+                max_severity = issue.severity
+                break
+        color = SEVERITY_COLOR_MAP[max_severity]
+        scroll_area_stylesheet = "QScrollArea { border: 5px solid "+color+"; }"
+        self.ui.scrollArea.setStyleSheet(scroll_area_stylesheet)
+        color_style_sheet_string = get_style_sheet_string_from_severity(max_severity)
+        self.ui.all_fix_button.setStyleSheet(color_style_sheet_string)
+        self.ui.all_results_button.setStyleSheet(color_style_sheet_string)
+        fixable_issues = [x for x in dirty_issues if x.has_fix_method]
+        tool_tip = None
+        if not fixable_issues:
+            tool_tip = 'No automatic fixes available for current issues. Please fix manually.'
+        self.ui.all_fix_button.setEnabled(bool(fixable_issues))
+        self.ui.all_fix_button.setToolTip(tool_tip)
+        if self.parent_to_notify:
+            self.parent_to_notify.update_validation_severity(max_severity)
+
+    def _scroll_issues_to_issue(self, issue):
+        i = self.initialized_issues.index(issue)
+        self._scroll_issues_to_index(i)
+
+    def _scroll_issues_to_index(self, index):
+        scroll_bar = self.ui.scrollArea.verticalScrollBar()
+        issue_height = 44
+        scroll_to_val = index * issue_height
+        scroll_bar.setValue(scroll_to_val)
+
+    def copy_all_reports(self):
+        dirty_issues = self.get_dirty_issues()
+        lines = ''
+        for issue in dirty_issues:
+            lines += 'Nodes with {}:\n    '.format(issue.label)
+            error_node_labels = [x.node_label for x in issue.validation_results]
+            lines += ', '.join(error_node_labels)
+            lines += '\n'
+        clipboard = QtGui.QGuiApplication.clipboard()
+        clipboard.clear()
+        clipboard.setText(lines)
+
     def _refresh_nodes_list_widgets(self):
         self.ui.objects_val_listWidget.clear()
         self.ui.objects_skip_listWidget.clear()
@@ -149,10 +251,17 @@ class ValidatorMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
                 issues_to_validate.append(issue)
         return issues_to_validate
 
-    def _get_dirty_issues(self, issues_to_validate=None):
+    def get_dirty_issues(self, issues_to_validate=None):
         issues_to_validate = issues_to_validate or self._get_all_issues_to_validate()
-        dirty_issues = [x for x in issues_to_validate if x.dirty]
+        dirty_issues = [x for x in issues_to_validate if x.dirty is True]
         return dirty_issues
+
+    def _all_issues_not_checked_yet(self, issues_to_validate=None):
+        issues_to_validate = issues_to_validate or self._get_all_issues_to_validate()
+        n = [True for x in issues_to_validate if x.dirty is None]
+        if n:
+            return all(n)
+        return False
 
     def _add_issue(self, issue):
         new_issue = issue(self)
@@ -173,9 +282,19 @@ class ValidatorMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
         all_val_nodes.sort()
         return all_val_nodes
 
+    def _init_ui_connections(self):
+        self.ui.validate_scene_button.clicked.connect(self.validate_scene)
+        self.ui.all_results_button.clicked.connect(self.copy_all_reports)
+        self.ui.all_fix_button.clicked.connect(self.fix_all)
+        self.ui.objects_refresh_button.clicked.connect(self.refresh_nodes_lists)
+        self.ui.objects_skipall_button.clicked.connect(self.blacklist_all_items)
+        self.ui.objects_skip_button.clicked.connect(self.blacklist_selected_items)
+        self.ui.objects_val_button.clicked.connect(self.whitelist_selected_items)
+        self.ui.presets_listWidget.itemSelectionChanged.connect(self.preset_selection_changed)
+
     def _init_presets(self):
         self.ui.presets_groupBox.setVisible(False)
-        self.preset_names = [PRESET_ALL, PRESET_MATERIALS_ONLY, PRESET_NONE]
+        self.preset_names = [PRESET_ALL, PRESET_SKINNED_MESHES, PRESET_MESHES, PRESET_MATERIALS_ONLY, PRESET_NONE]
         self.preset_name_to_issue_state = {}
         for preset_name in self.preset_names:
             self.preset_name_to_issue_state.setdefault(preset_name, [])
@@ -255,7 +374,7 @@ class ValidationIssueWidget(flottiui.FlottiMayaWindowDesignerUI):
     def __init__(self, validator_instance):
         super(ValidationIssueWidget, self).__init__()
         self.validator_instance = validator_instance
-        self.dirty = True
+        self.dirty = None
         self.ui.issue_label.setText(self.description)
         self.ui.issue_icon_label.setPixmap(self.preval_path)
         self.report_widget = self.report_widget or IssueReportWidget
@@ -266,7 +385,7 @@ class ValidationIssueWidget(flottiui.FlottiMayaWindowDesignerUI):
         self.ui.issue_fix_pushButton.clicked.connect(self.fix_issue)
         self._init_progress_bar()
 
-    def validate_issue(self):
+    def validate_issue(self, update_parent_ui=True):
         nodes_to_validate = self.get_whitelisted_nodes_to_validate()
         result = None
         if nodes_to_validate:
@@ -279,9 +398,9 @@ class ValidationIssueWidget(flottiui.FlottiMayaWindowDesignerUI):
             self.ui.actions_enabled_hbox.setEnabled(True)
             [val_node.assess_severity() for val_node in result]
             severity = min([val_node.severity for val_node in result])
-            severity_color = SEVERITY_COLOR_MAP.get(severity, UNKNOWN_COLOR)
+            severity_color = SEVERITY_COLOR_MAP.get(severity, COLOR_UNKNOWN)
             self._set_buttons_color(severity_color)
-            icon_path = self.severity_icon_map.get(severity, UNKNOWN_COLOR)
+            icon_path = self.severity_icon_map.get(severity, COLOR_UNKNOWN)
             self.ui.issue_icon_label.setPixmap(icon_path)
             if not self.has_fix_method:
                 self.ui.issue_fix_pushButton.setEnabled(self.has_fix_method)
@@ -296,7 +415,9 @@ class ValidationIssueWidget(flottiui.FlottiMayaWindowDesignerUI):
             if not self.has_fix_method:
                 self.ui.issue_fix_pushButton.setToolTip(None)
             print('Success! {} did not encounter any errors to report.'.format(self.label))
-        # self.validator_instance.refresh_buttons()
+        if update_parent_ui:
+            self.validator_instance.update_ui_elements_based_on_issue_results()
+        self.validator_instance.update_ui_elements_based_on_issue_results()
 
     def validate(self, nodes_to_validate=None):
         raise NotImplementedError(self.error_msg)
@@ -380,7 +501,7 @@ class ValidatedNodeUIContainer:
         except ValueError:
             # if there are no issues min() will provoke a ValueError
             pass
-        self.node_label_background_color = SEVERITY_COLOR_MAP.get(self.severity, UNKNOWN_COLOR)
+        self.node_label_background_color = SEVERITY_COLOR_MAP.get(self.severity, COLOR_UNKNOWN)
         return self.severity
 
     def append_issue(self, issue):
@@ -404,7 +525,7 @@ class IssueDataUIContainer:
 
     def set_severity(self, severity):
         self.severity = severity
-        self.issue_color = SEVERITY_COLOR_MAP.get(self.severity, UNKNOWN_COLOR)
+        self.issue_color = SEVERITY_COLOR_MAP.get(self.severity, COLOR_UNKNOWN)
 
 
 class IssueReportWidget(flottiui.FlottiMayaWindowDesignerUI):
@@ -437,7 +558,10 @@ class IssueReportWidget(flottiui.FlottiMayaWindowDesignerUI):
                     issue.issue_label = '{0} Error #{1}'.format(val_node.node_label, i+1)
             to_sort.append((val_node.node_label, val_node))
         # sort alphabetically by node name
-        to_sort.sort()
+        try:
+            to_sort.sort()
+        except TypeError:
+            pass
         _, sorted_validation_data = zip(*to_sort)
         return sorted_validation_data
 
@@ -559,7 +683,7 @@ class ExceedingVertsIssueReportWidget(IssueReportWidget):
 
 class ExceedingVertsIssueWidget(ValidationIssueWidget):
     category = CATEGORY_SKMESH
-    presets = [PRESET_ALL]
+    presets = [PRESET_ALL, PRESET_SKINNED_MESHES]
     label = 'Exceeding Verts'
     description = 'Vertices with more than four influences.'
     issue_report_label = 'Vertices in {} with more than four influences'
@@ -616,7 +740,7 @@ class NonNormalizedVertsIssueReportWidget(IssueReportWidget):
 
 class NonNormalizedVertsIssueWidget(ValidationIssueWidget):
     category = CATEGORY_SKMESH
-    presets = [PRESET_ALL]
+    presets = [PRESET_ALL, PRESET_SKINNED_MESHES]
     label = 'Non-normalized Verts'
     description = 'Vertices with non normalized weights.'
     issue_report_label = 'Vertices in {} with non-normalized weights'
@@ -665,7 +789,7 @@ class ExceedingJointsIssueReportWidget(IssueReportWidget):
 
 class ExceedingJointsIssueWidget(ValidationIssueWidget):
     category = CATEGORY_SKMESH
-    presets = [PRESET_ALL]
+    presets = [PRESET_ALL, PRESET_SKINNED_MESHES]
     label = 'Too Many Joints'
     description = 'Meshes skinned to more than 64 joints.'
     issue_report_label = '{} is skinned to more than 64 joints'
@@ -715,7 +839,7 @@ class ExtraRootJointsIssueReportWidget(IssueReportWidget):
 
 class ExtraRootJointsIssueWidget(ValidationIssueWidget):
     category = CATEGORY_SKMESH
-    presets = [PRESET_ALL]
+    presets = [PRESET_ALL, PRESET_SKINNED_MESHES]
     label = 'Extra Root Joints'
     description = 'Skeletons that have more than one root.'
     issue_report_label = '{} has more than one root joint in its skeleton.'
@@ -811,6 +935,320 @@ class MediaNotInTexturePathsIssueWidget(ValidationIssueWidget):
         return matutils.get_used_materials_in_scene()
 
 
+class JointsWithDuplicatedNamesIssueReportWidget(IssueReportWidget):
+    window_title = "Check for duplicated joint names report"
+
+    @staticmethod
+    def format_issue_and_add_to_group_box(issue, issue_layout):
+        list_widget = QtWidgets.QListWidget()
+        list_widget.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        widget_items = [QtWidgets.QListWidgetItem(str(x)) for x in issue.data]
+        [list_widget.addItem(x) for x in widget_items]
+
+        def on_sel_changed():
+            selected_indexes = list_widget.selectedIndexes()
+            selected_nodes = [issue.data[i.row()] for i in selected_indexes]
+            pm.select(selected_nodes)
+        list_widget.itemSelectionChanged.connect(on_sel_changed)
+        issue_layout.addWidget(list_widget)
+
+
+class JointsWithDuplicatedNamesIssueWidget(ValidationIssueWidget):
+    category = CATEGORY_SKMESH
+    presets = [PRESET_ALL, PRESET_SKINNED_MESHES]
+    label = 'Joints with non unique names'
+    description = 'Joints with non unique names'
+    issue_report_label = '{} is sharing its name with another joint.'
+    severity = SEVERITY_ERROR
+    report_widget = JointsWithDuplicatedNamesIssueReportWidget
+    has_fix_method = False
+
+    def validate(self, skinned_meshes=None):
+        joints_dict = val_skmesh.get_dup_joint_names_from_scene(skinned_meshes)
+
+        self.validation_results = self.format_validation_results(joints_dict,
+                                                                 self.issue_report_label,
+                                                                 severity=self.severity)
+        return self.validation_results
+
+    def get_nodes_to_validate(self):
+        return skinutils.get_skinned_meshes_from_scene()
+
+
+class MissingUVsIssueReportWidget(IssueReportWidget):
+    window_title = "Validate Missing UVs Report"
+
+    @staticmethod
+    def format_issue_and_add_to_group_box(issue, issue_layout):
+        _setup_simple_report_list_widget(issue.data, issue_layout)
+
+    @staticmethod
+    def format_issues_for_clipboard(issues):
+        lines = 'Validation report:\n'
+        for issue in issues:
+            lines += '{0} has unmapped faces. {1} faces missing UVs: \n    {2}\n'.format(
+                issue.parent_val_data.node_label, len(issue.data), issue.data)
+        return lines
+
+
+class MissingUVsIssueWidget(ValidationIssueWidget):
+    category = CATEGORY_MESH
+    presets = [PRESET_ALL, PRESET_MESHES, PRESET_SKINNED_MESHES]
+    label = 'Missing UVs'
+    description = 'Meshes with unmapped faces.'
+    issue_report_label = '{} has faces that are missing UVs.'
+    severity = SEVERITY_ERROR
+    report_widget = MissingUVsIssueReportWidget
+    has_fix_method = False
+
+    def validate(self, meshes=None):
+        meshes_to_bad_faces = val_mesh.get_missing_uvs_from_scene(meshes, progress_bar=self.ui.progress_bar)
+        self.validation_results = self.format_validation_results(meshes_to_bad_faces,
+                                                                 self.issue_report_label,
+                                                                 severity=self.severity)
+        return self.validation_results
+
+    def get_nodes_to_validate(self):
+        return val_mesh.get_missing_uvs_from_scene()
+
+
+class MultipleShapeNodesIssueReportWidget(IssueReportWidget):
+    window_title = "Validate Too Many Shape Nodes Report"
+
+    @staticmethod
+    def format_issue_and_add_to_group_box(issue, issue_layout):
+        _setup_simple_report_list_widget(issue.data, issue_layout)
+
+    @staticmethod
+    def format_issues_for_clipboard(issues):
+        lines = 'Validation report:\n'
+        for issue in issues:
+            lines += '{0} has {1} shape nodes but should only have one: \n    {2}\n'.format(
+                issue.parent_val_data.node_label, len(issue.data), issue.data)
+        return lines
+
+
+class MultipleShapeNodesIssueWidget(ValidationIssueWidget):
+    category = CATEGORY_MESH
+    presets = [PRESET_ALL, PRESET_MESHES, PRESET_SKINNED_MESHES]
+    label = 'Multiple shape nodes'
+    description = 'Meshes with too many shape nodes.'
+    issue_report_label = '{} has too many shape nodes.'
+    severity = SEVERITY_ERROR
+    report_widget = MultipleShapeNodesIssueReportWidget
+    has_fix_method = False
+
+    def validate(self, meshes=None):
+        meshes_to_shapes = val_mesh.get_meshes_with_multiple_shapes_from_scene(
+            meshes, progress_bar=self.ui.progress_bar)
+        self.validation_results = self.format_validation_results(meshes_to_shapes,
+                                                                 self.issue_report_label,
+                                                                 severity=self.severity)
+        return self.validation_results
+
+    def get_nodes_to_validate(self):
+        return meshutils.get_meshes_from_scene()
+
+
+class DirtyHistoryMeshIssueReportWidget(IssueReportWidget):
+    window_title = "Validate Dirty History Report"
+
+    @staticmethod
+    def format_issue_and_add_to_group_box(issue, issue_layout):
+        _setup_simple_report_list_widget(issue.data, issue_layout)
+
+    @staticmethod
+    def format_issues_for_clipboard(issues):
+        lines = 'Validation report:\n'
+        for issue in issues:
+            lines += '{0} has dirty construction history: \n    {1}\n'.format(
+                issue.parent_val_data.node_label, issue.data)
+        return lines
+
+
+class DirtyHistoryMeshIssueWidget(ValidationIssueWidget):
+    category = CATEGORY_MESH
+    presets = [PRESET_ALL, PRESET_MESHES, PRESET_SKINNED_MESHES]
+    label = 'Dirty construction history'
+    description = 'Meshes with dirty construction history.'
+    issue_report_label = '{} has dirty construction history.'
+    severity = SEVERITY_WARNING
+    report_widget = DirtyHistoryMeshIssueReportWidget
+
+    def validate(self, meshes=None):
+        meshes_to_shapes = val_mesh.get_meshes_with_dirty_history_from_scene(
+            meshes, progress_bar=self.ui.progress_bar)
+        self.validation_results = self.format_validation_results(meshes_to_shapes,
+                                                                 self.issue_report_label,
+                                                                 severity=self.severity)
+        return self.validation_results
+
+    def get_nodes_to_validate(self):
+        return meshutils.get_meshes_from_scene()
+
+    def fix(self):
+        meshes = [v.node for v in self.validation_results]
+        val_mesh.fix_meshes_with_dirty_history(meshes)
+
+
+class OverlappingVerticesIssueReportWidget(IssueReportWidget):
+    window_title = "Validate Overlapping Vertices"
+
+    @staticmethod
+    def format_issue_and_add_to_group_box(issue, issue_layout):
+        _setup_simple_report_list_widget(issue.data, issue_layout)
+
+    @staticmethod
+    def format_issues_for_clipboard(issues):
+        lines = 'Validation report:\n'
+        for issue in issues:
+            lines += '{0} has {1} overlapping vertices: \n    {2}\n'.format(
+                issue.parent_val_data.node_label, len(issue.data), issue.data)
+        return lines
+
+
+class OverlappingVerticesIssueWidget(ValidationIssueWidget):
+    category = CATEGORY_MESH
+    presets = [PRESET_ALL, PRESET_MESHES, PRESET_SKINNED_MESHES]
+    label = 'Overlapping Vertices'
+    description = 'Meshes with overlapping vertices.'
+    issue_report_label = '{} has overlapping vertices.'
+    severity = SEVERITY_WARNING
+    report_widget = OverlappingVerticesIssueReportWidget
+    has_fix_method = False
+
+    def validate(self, meshes=None):
+        meshes_to_bad_verts = val_mesh.get_meshes_with_overlapping_verts_from_scene(
+            meshes, progress_bar=self.ui.progress_bar)
+        self.validation_results = self.format_validation_results(meshes_to_bad_verts,
+                                                                 self.issue_report_label,
+                                                                 severity=self.severity)
+        return self.validation_results
+
+    def get_nodes_to_validate(self):
+        return meshutils.get_meshes_from_scene()
+
+
+class VertexColorIssueReportWidget(IssueReportWidget):
+    window_title = "Validate Overlapping Vertices"
+
+    @staticmethod
+    def format_issue_and_add_to_group_box(issue, issue_layout):
+        node_and_value_pairs = []
+        for vert_index, vert_color in issue.data.items():
+            node_and_value_pairs.append((issue.parent_val_data.node.vtx[vert_index], vert_color))
+        _setup_simple_vert_table(node_and_value_pairs, 'Vert Color', issue_layout)
+
+    @staticmethod
+    def format_issues_for_clipboard(issues):
+        lines = 'Validation report:\n'
+        for issue in issues:
+            lines += '{0} has {1} vertices with invalid vert color: \n    {2}\n'.format(
+                issue.parent_val_data.node_label, len(issue.data), issue.data)
+        return lines
+
+
+class VertexColorIssueWidget(ValidationIssueWidget):
+    category = CATEGORY_MESH
+    presets = [PRESET_ALL, PRESET_MESHES, PRESET_SKINNED_MESHES]
+    label = 'Invalid Vertex Color'
+    description = 'Meshes with invalid vertex color.'
+    issue_report_label = '{} has vertices with invalid color.'
+    severity = SEVERITY_WARNING
+    report_widget = VertexColorIssueReportWidget
+    has_fix_method = True
+
+    def fix(self):
+        self.ui.pbar_vis_widget.setVisible(True)
+        meshes_and_verts = []
+        for val_node in self.validation_results:
+            issue_data = val_node.issues[0].data
+            verts = [val_node.node.vtx[i] for i in issue_data.keys()]
+            meshes_and_verts.append((val_node.node, verts))
+        val_mesh.remove_vert_color(meshes_and_verts)
+        self.ui.pbar_vis_widget.setVisible(False)
+
+    def validate(self, meshes=None):
+        meshes_to_bad_verts = val_mesh.get_invalid_vertex_colors_from_scene(
+            meshes, progress_bar=self.ui.progress_bar)
+        self.validation_results = self.format_validation_results(meshes_to_bad_verts,
+                                                                 self.issue_report_label,
+                                                                 severity=self.severity)
+        return self.validation_results
+
+    def get_nodes_to_validate(self):
+        return meshutils.get_meshes_from_scene()
+
+
+class ValidatorEmbedded(QtWidgets.QWidget):
+    validator_presets = [PRESET_SKINNED_MESHES, PRESET_MESHES]
+
+    def __init__(self, parent_layout):
+        super().__init__()
+        self.nodes = []
+        self.validation_severity = None
+        self.validator_instance = None
+        v_box = QtWidgets.QVBoxLayout()
+        v_box.setContentsMargins(0, 0, 0, 0)
+        h_box = QtWidgets.QHBoxLayout()
+        h_box.setContentsMargins(0, 0, 0, 0)
+        self.validate_button = QtWidgets.QPushButton('Validate')
+        self.validate_open_button = QtWidgets.QPushButton()
+        self.validate_open_button.setMaximumWidth(23)
+        options_icon = QtGui.QPixmap(os.path.join(path_consts.ICONS_DIR, 'options.svg'))
+        self.validate_open_button.setIcon(options_icon)
+
+        h_box.addWidget(self.validate_button)
+        h_box.addWidget(self.validate_open_button)
+        v_box.addLayout(h_box)
+
+        self.pbar_vis_widget = flottiui.VisibilityToggleWidget()
+        self.progress_bar = flottiui.ProgressBarWithLabel()
+        self.pbar_vis_widget.layout().addWidget(self.progress_bar)
+        self.pbar_vis_widget.setVisible(False)
+        v_box.addWidget(self.pbar_vis_widget)
+        self.setLayout(v_box)
+
+        parent_layout.insertWidget(0, self)
+        self.validate_button.clicked.connect(self.validate_scene)
+        self.validate_open_button.clicked.connect(self.show_validator)
+
+    def validate_scene(self):
+        self.get_validator_instance()
+        self.pbar_vis_widget.setVisible(True)
+        self.validator_instance.set_preset_selection(self.validator_presets)
+        self.validator_instance.refresh_nodes_lists(self.nodes)
+        self.validator_instance.validate_scene()
+        self.pbar_vis_widget.setVisible(False)
+        self.validator_instance.update_ui_elements_based_on_issue_results()
+        if self.validator_instance.get_dirty_issues():
+            self.validator_instance.show()
+
+    def show_validator(self):
+        self.get_validator_instance()
+        self.validator_instance.update_ui_elements_based_on_issue_results()
+        self.validator_instance.show()
+
+    def get_validator_instance(self):
+        if self.validator_instance:
+            return self.validator_instance
+        if VALIDATOR_UI:
+            if VALIDATOR_UI.isVisible():
+                self.validator_instance = VALIDATOR_UI
+                self.validator_instance.set_parent_to_notify(self)
+                self.validator_instance.update_ui_elements_based_on_issue_results()
+                self.validator_instance.setFocus()
+                return self.validator_instance
+        self.validator_instance = validator_launch(self, launch_hidden=True)
+        return self.validator_instance
+
+    def update_validation_severity(self, severity=None):
+        self.validation_severity = severity
+        style_sheet_string = get_style_sheet_string_from_severity(self.validation_severity)
+        self.validate_button.setStyleSheet(style_sheet_string)
+        self.validate_open_button.setStyleSheet(style_sheet_string)
+
+
 def _setup_simple_vert_table(node_and_value_pairs, column_label, parent_layout):
     table = QtWidgets.QTableWidget()
     table.setColumnCount(1)
@@ -821,9 +1259,9 @@ def _setup_simple_vert_table(node_and_value_pairs, column_label, parent_layout):
     table.setHorizontalHeaderLabels([column_label])
     cell_index_to_vert = {}
     vert_labels = []
-    for i, (vert, influences_to_weights) in enumerate(node_and_value_pairs):
-        cell_index_to_vert[i] = vert
-        vert_labels.append(vert.name())
+    for i, (node, influences_to_weights) in enumerate(node_and_value_pairs):
+        cell_index_to_vert[i] = node
+        vert_labels.append(node.name())
         infcount_tableitem = QtWidgets.QTableWidgetItem(str(influences_to_weights))
         table.setItem(0, i, infcount_tableitem)
     table.setVerticalHeaderLabels(vert_labels)
@@ -834,3 +1272,25 @@ def _setup_simple_vert_table(node_and_value_pairs, column_label, parent_layout):
 
     table.itemSelectionChanged.connect(on_sel_change)
     table.resizeColumnsToContents()
+
+
+def _setup_simple_report_list_widget(nodes, parent_layout):
+    list_widget = QtWidgets.QListWidget()
+    list_widget.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+    parent_layout.addWidget(list_widget)
+    for node in nodes:
+        list_item = QtWidgets.QListWidgetItem(node.name())
+        list_widget.addItem(list_item)
+
+    def on_sel_change():
+        to_select = [nodes[i.row()] for i in list_widget.selectedIndexes()]
+        pm.select(to_select, r=True)
+    list_widget.itemSelectionChanged.connect(on_sel_change)
+
+
+def get_style_sheet_string_from_severity(severity):
+    style_sheet_string = "background-color: {}"
+    if severity is not None:
+        color = SEVERITY_COLOR_MAP[severity]
+        style_sheet_string = "background-color: {}".format(color)
+    return style_sheet_string

@@ -1,12 +1,25 @@
+import os
+
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 import pymel.core as pm
 import PySide2.QtCore as QtCore
+import PySide2.QtGui as QtGui
 import PySide2.QtUiTools as QtUiTools
 import PySide2.QtWidgets as QtWidgets
 
+import flottitools.path_consts as path_consts
+
+
+CANCEL_STRING = 'Cancel'
+SAVE_STRING = 'Save'
+DONT_SAVE_STRING = "Don't Save"
+
+RED_LABEL_CS_STRING = "QLabel{ color: rgb(255, 50, 50); }"
+GREEN_LABEL_CS_STRING = "QLabel{ color: rgb(50, 255, 50); }"
+
 
 class FlottiWindow(QtWidgets.QDialog):
-    window_title = "FlottiTools Window"
+    window_title = "SSE Window"
     object_name = None
 
     def __init__(self, parent=None):
@@ -28,6 +41,9 @@ class FlottiWindow(QtWidgets.QDialog):
 class FlottiMayaWindow(MayaQWidgetDockableMixin, FlottiWindow):
     window_title = "FlottiTools Maya Window"
     object_name = None
+    
+    def __init__(self, parent=None):
+        super(FlottiMayaWindow, self).__init__(parent=parent)
 
 
 class FlottiWindowDesignerUI(FlottiWindow):
@@ -45,6 +61,8 @@ class FlottiWindowDesignerUI(FlottiWindow):
 
         self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().addWidget(self.ui)
+        # set window to minimize size when it launches
+        self.resize(0, 0)
 
 
 class FlottiMayaWindowDesignerUI(MayaQWidgetDockableMixin, FlottiWindowDesignerUI):
@@ -228,3 +246,29 @@ class ProgressBarWithLabel(QtWidgets.QWidget):
         self.label.setText(text)
         pm.refresh()
 
+
+def unsaved_changes_prompt():
+    if not pm.isModified():
+        return True
+    scene_path = pm.sceneName()
+    path_string = 'unsaved file'
+    if scene_path != pm.Path():
+        path_string = str(scene_path).replace(os.sep, '/')
+
+    result = pm.confirmDialog(title='Save Changes', message='Save changes to {}?'.format(path_string),
+                              button=[SAVE_STRING, DONT_SAVE_STRING, CANCEL_STRING],
+                              defaultButton=SAVE_STRING, cancelButton=CANCEL_STRING, dismissString=CANCEL_STRING)
+    if result == SAVE_STRING:
+        pm.saveFile()
+        return True
+    elif result == DONT_SAVE_STRING:
+        return True
+    return False
+
+
+
+class RefreshButton(QtWidgets.QPushButton):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        refresh_icon = QtGui.QPixmap(os.path.join(path_consts.ICONS_DIR, 'refresh.svg'))
+        self.setIcon(refresh_icon)

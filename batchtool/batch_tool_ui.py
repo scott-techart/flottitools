@@ -114,11 +114,7 @@ class BatcherMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
         logger = Logger(self.files_list_paths, operation_name)
         result = None
         try:
-            p4_instance = None
-            if self.p4_instance:
-                if self.p4_instance.connected():
-                    p4_instance = self.p4_instance
-            result = operation_method(self.files_list_paths, logger, p4_instance)
+            result = operation_method(self.files_list_paths, logger)
         except Exception as e:
             logger.log(operation_name, e)
         logger.finish()

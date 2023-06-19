@@ -1,9 +1,7 @@
-import random
-
 import maya.api.OpenMaya as om
 import pymel.core as pm
 
-import SSEMaya.Utilities.openmayautils as omutils
+import flottitools.utils.openmayautils as omutils
 
 NO_VERTEX_COLOR = om.MColor((-1, -1, -1, -1))
 

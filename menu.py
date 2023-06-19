@@ -39,8 +39,11 @@ class FlottiToolsMenu:
     developer = 'menu_developer'
 
     def __init__(self):
-        if pm.menu(self.top_menu_name, exists=True):
+        # if pm.menu(self.top_menu_name, exists=True):
+        try:
             pm.deleteUI(self.top_menu_name)
+        except RuntimeError:
+            pass
 
         self.menu_flottitools = pm.menu(self.top_menu_name, parent=get_gmain_window(), tearOff=True, label=self.top_menu_label)
 

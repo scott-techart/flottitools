@@ -1,6 +1,8 @@
+import maya.api.OpenMaya as om
 from pymel import core as pm
 
 import flottitools.utils.namespaceutils as namespaceutils
+import flottitools.utils.selectionutils as selutils
 import flottitools.utils.transformutils as xformutils
 
 # joint label side
@@ -390,3 +392,69 @@ def get_extra_root_joints_from_root_joint(root_joint):
         except IndexError:
             pass
     return extra_roots
+
+
+def orient_selected_joints(up_target_vec=om.MVector().kYaxisVector,
+                           mirror_side_vector=None, aim_axis_index=0, up_axis_index=1):
+    selected_transform_nodes = pm.selected(type=pm.nt.Transform)
+    with selutils.preserve_selection():
+        for node in selected_transform_nodes:
+            orient_joint(node, up_target_vec=up_target_vec, mirror_side_vector=mirror_side_vector,
+                         aim_axis_index=aim_axis_index, up_axis_index=up_axis_index)
+
+
+def orient_joint(node, up_target_vec=om.MVector().kYaxisVector,
+                 mirror_side_vector=None, aim_axis_index=0, up_axis_index=1):
+    mirror = False
+    if mirror_side_vector is not None:
+        node_ws_loc = xformutils.get_worldspace_vector(node)
+        if node_ws_loc * mirror_side_vector > 0:
+            mirror = True
+    with pm.UndoChunk():
+        children = node.getChildren()
+        try:
+            first_child = children[0]
+        except IndexError:
+            node.setRotation((0, 0, 0))
+            node.jointOrient.set(0, 0, 0)
+            return
+
+        names = [c.name() for c in children]
+        [c.setParent(world=True) for c in children]
+        node.jointOrient.set(0, 0, 0)
+        node.rotate.set(0, 0, 0)
+        xformutils.aim_node_at_node(node, first_child, up_target_vec=up_target_vec, mirror=mirror,
+                                    aim_axis_index=aim_axis_index, up_axis_index=up_axis_index)
+        move_rotation_to_joint_orient(node)
+        [c.setParent(node) for c in children]
+        [c.rename(n) for c, n in zip(children, names) if c.name() != n]
+
+
+def move_rotation_to_joint_orient(joint):
+    rotation = joint.rotate.get()
+    joint.rotate.set((0, 0, 0))
+    joint.jointOrient.set(rotation)
+
+
+def set_joint_label(joint: pm.nt.Joint):
+    side_list = ["_c", "_l", "_r"]  # Center, left, right
+    joint_side = joint.name()[-2:].lower()  # Side labelling at the end of name
+    joint_name = joint.name()
+    side_num = 0
+
+    if joint_side in side_list:
+        side_num = side_list.index(joint_side)
+        joint_name = joint_side.join(joint.split(joint_side)[:-1])  # Side labelling at the end of name
+
+    joint.side.set(side_num)
+
+    # Set label type to Other
+    pm.setAttr(f"{joint}.type", 18)
+
+    # Set joint label
+    joint.otherType.set(joint_name)
+
+
+def set_joint_labels_from_root(root_joint: pm.nt.Joint):
+    joints = get_hierarchy_from_root(root_joint, joints_only=True)
+    [set_joint_label(each_joint) for each_joint in joints]

@@ -26,13 +26,13 @@ def get_path_relative_to_folder_name(path, folder_name):
     try:
         index = lower_case_parts.index(folder_name.lower()) - 1
     except ValueError:
-        return
+        return None, None
     relative_root = path.parents[index]
     relative_path = path.relative_to(relative_root)
-    return relative_path
+    return relative_root, relative_path
 
 
 def get_mel_formatted_path(file_path):
-    file_path_mel_formatted = os.path.abspath(file_path)
+    file_path_mel_formatted = str(file_path)
     file_path_mel_formatted = file_path_mel_formatted.replace('\\', '/')
     return file_path_mel_formatted

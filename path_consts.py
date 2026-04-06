@@ -4,3 +4,5 @@ import os
 FLOTTITOOLS_DIR = os.path.dirname(__file__)
 UI_DIR = os.path.join(FLOTTITOOLS_DIR, 'ui')
 ICONS_DIR = os.path.join(UI_DIR, 'icons')
+
+CONTENTSOURCE_FOLDER_NAME = 'ContentSource'

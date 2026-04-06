@@ -4,9 +4,6 @@ import shutil
 import stat
 
 import pymel.core as pm
-import PySide2.QtCore as QtCore
-import PySide2.QtWidgets as QtWidgets
-import PySide2.QtGui as QtGui
 
 import flottitools.path_consts as path_consts
 import flottitools.ui as flottiui
@@ -14,6 +11,8 @@ import flottitools.utils.ioutils as ioutils
 import flottitools.utils.materialutils as matutils
 import flottitools.utils.meshutils as meshutils
 import flottitools.utils.pathutils as pathutils
+
+from flottitools.ui import QtCore, QtWidgets, QtGui
 
 
 BATCHTOOL_UI = None
@@ -171,7 +170,7 @@ class BatcherMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
         browser_dialog = QtWidgets.QFileDialog(self)
         browser_dialog.setWindowTitle('Choose a root directory to search for files from.')
         browser_dialog.setDirectory(path_consts.FLOTTITOOLS_DIR)
-        browser_dialog.setFileMode(QtWidgets.QFileDialog.DirectoryOnly)
+        browser_dialog.setFileMode(QtWidgets.QFileDialog.FileMode.Directory)
         dir_was_selected = browser_dialog.exec()
         if dir_was_selected:
             selected_dir = browser_dialog.selectedFiles()[0]

@@ -1,8 +1,8 @@
 import pymel.core as pm
 
-import flottitools.utils.selectionutils as selectionutils
-import flottitools.utils.transformutils as xformutils
-import flottitools.utils.skinutils as skinutils
+import apmaya.utils.selectionutils as selectionutils
+import apmaya.utils.transformutils as xformutils
+import apmaya.utils.skinutils as skinutils
 
 
 class AverageWeights(object):
@@ -30,17 +30,15 @@ class AverageWeights(object):
             pm.skinPercent(target_skincl, target_verts, normalize=True)
 
     def apply_proximity_weights(self):
-        shape_to_skincl, svert_to_infs_wts = get_shape_to_skincl_and_vert_to_infs_wts(
-            self.sampled_verts)
         if not self.sampled_verts:
             return
-
+        verts_infs_and_wts = get_verts_infs_and_wts(self.sampled_verts)
         target_verts = selectionutils.convert_selection_to_verts()
         target_skincl = skinutils.get_skincluster(target_verts[0])
         with pm.UndoChunk():
             with skinutils.max_influences_normalize_weights_disabled(target_skincl):
                 for target_vert in target_verts:
-                    infs_to_weights = get_scaled_influence_to_weight_totals(svert_to_infs_wts, target_vert)
+                    infs_to_weights = get_scaled_influence_to_weight_totals(verts_infs_and_wts, target_vert)
                     pruned_infs_to_weights = get_pruned_influences_to_weights(infs_to_weights)
                     pm.skinPercent(target_skincl, target_vert, transformValue=pruned_infs_to_weights.items())
             pm.skinPercent(target_skincl, target_verts, normalize=True)
@@ -55,11 +53,11 @@ def get_shape_to_skincl_and_vert_to_infs_wts(verts):
         shape_to_skincl[shape] = skincl
 
     vert_to_infs_wts = {}
-    for shape_node, vert in zip(shape_nodes, verts):
-        skincl = shape_to_skincl[shape_node]
+    for vert in verts:
+        skincl = skinutils.get_skincluster(vert)
         influences = pm.skinPercent(skincl, vert, query=True, transform=None)
         weights = pm.skinPercent(skincl, vert, query=True, value=True)
-        vert_to_infs_wts[vert] = influences, weights
+        vert_to_infs_wts[vert.index()] = influences, weights
 
     return shape_to_skincl, vert_to_infs_wts
 
@@ -73,16 +71,14 @@ def get_influence_to_weight_totals(vert_to_infs_wts):
     return influence_to_weight_totals
 
 
-def get_scaled_influence_to_weight_totals(vert_to_infs_wts, target_vert):
-    target_pos = xformutils.get_worldspace_vector(target_vert)
-    sampled_verts, sampled_positions = zip(*[(v, xformutils.get_worldspace_vector(v)) for v in vert_to_infs_wts.keys()])
-    scalers = xformutils.get_distance_scalers(target_pos, sampled_positions)
-    sampled_vert_to_scaler = dict(zip(sampled_verts, scalers))
-
+def get_scaled_influence_to_weight_totals(verts_infs_and_wts, target_vert):
+    target_pos = get_orig_vert_position(target_vert)
+    verts, infs, weights, sample_positions = zip(*[(vert, infs, wts, get_orig_vert_position(vert))
+                                                   for vert, infs, wts in verts_infs_and_wts])
+    scalers = xformutils.get_distance_scalers(target_pos, sample_positions)
     infs_to_weights = {}
-    for vert, infs_and_weights in vert_to_infs_wts.items():
-        scaler = sampled_vert_to_scaler[vert]
-        for inf, wt in zip(*infs_and_weights):
+    for vert, infs, wts, scaler in zip(verts, infs, weights, scalers):
+        for inf, wt in zip(infs, wts):
             scaled_weight = wt * scaler
             current_weight = infs_to_weights.get(inf, 0.0)
             infs_to_weights[inf] = current_weight + scaled_weight
@@ -90,7 +86,7 @@ def get_scaled_influence_to_weight_totals(vert_to_infs_wts, target_vert):
 
 
 def get_pruned_influences_to_weights(inf_to_wt_totals, divisor=1.0):
-    to_sort = inf_to_wt_totals.values()
+    to_sort = list(inf_to_wt_totals.values())
     to_sort.sort(reverse=True)
     try:
         prune_val = to_sort[3]
@@ -105,3 +101,39 @@ def get_pruned_influences_to_weights(inf_to_wt_totals, divisor=1.0):
         else:
             pruned_inf_to_weight[inf] = (wt_total / divisor)
     return pruned_inf_to_weight
+
+
+def get_orig_vert_position(vertex):
+    orig_vert = get_orig_vert_from_vert(vertex)
+    return xformutils.get_worldspace_vector(orig_vert)
+
+
+def get_orig_vert_from_vert(vertex):
+    skin_cl = skinutils.get_skincluster(vertex)
+    try:
+        orig_shape_node = skin_cl.originalGeometry.inputs(shapes=True)[0]
+    except IndexError:
+        shape_node = vertex.node()
+        shapes = vertex.listHistory(type='shape', future=False)
+        shapes.remove(shape_node)
+        orig_shape_node = shapes[0]
+    orig_vert = orig_shape_node.vtx[vertex.index()]
+    return orig_vert
+
+
+def get_verts_infs_and_wts(verts):
+    shape_nodes = pm.ls(verts, objectsOnly=True)
+    shapes_no_dups = set(shape_nodes)
+    shape_to_skincl = {}
+    for shape in shapes_no_dups:
+        skincl = skinutils.get_skincluster(shape)
+        shape_to_skincl[shape] = skincl
+
+    vert_infs_and_wts = []
+    for vert in verts:
+        skincl = skinutils.get_skincluster(vert)
+        influences = pm.skinPercent(skincl, vert, query=True, transform=None)
+        weights = pm.skinPercent(skincl, vert, query=True, value=True)
+        vert_infs_and_wts.append((vert, influences, weights))
+
+    return vert_infs_and_wts

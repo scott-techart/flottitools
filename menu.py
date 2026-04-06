@@ -4,8 +4,11 @@ import inspect
 import maya.mel as mel
 import pymel.core as pm
 
-import flottitools.skintools.transferskin.copy_skin_ui as copyskin_ui
-import flottitools.ui.averageweights_ui as avgwts_ui
+import flottitools.animation.anim_exporter_ui as anim_exporter_ui
+import flottitools.fix_paths as fix_paths
+import flottitools.environment.export_env as export_env
+import flottitools.skinmesh.copyskin.copy_skin_ui as copyskin_ui
+import flottitools.skinmesh.averageweights.averageweights_ui as avgwts_ui
 import flottitools.validation.validator as validator
 
 
@@ -34,24 +37,39 @@ class FlottiToolsMenu:
     top_menu_label = "Flotti Tools"
 
     top_menu = 'menu_flottitools'
-    modelling = 'menu_modelling'
-    rigging = 'menu_rigging'
-    developer = 'menu_developer'
+    character = 'Character'
+    environment = 'Environment'
+    animation = 'Animation'
+    modelling = 'Modelling'
+    rigging = 'Rigging'
+    skinning = 'Skinning'
+    perforce = 'Perforce'
+    preferences = 'Preferences'
 
     def __init__(self):
-        # if pm.menu(self.top_menu_name, exists=True):
         try:
             pm.deleteUI(self.top_menu_name)
         except RuntimeError:
             pass
 
         self.menu_flottitools = pm.menu(self.top_menu_name, parent=get_gmain_window(), tearOff=True, label=self.top_menu_label)
+        self.menu_label_to_menu = {}
 
         def make_sub_menu(label):
-            return pm.menuItem(parent=self.menu_flottitools, label=label, subMenu=True, tearOff=True)
-        self.menu_rigging = make_sub_menu("Rigging")
+            menu_string = pm.menuItem(parent=self.menu_flottitools, label=label, subMenu=True, tearOff=True)
+            self.menu_label_to_menu[label] = menu_string
+            return menu_string
 
+        menus_by_topic = [self.character, self.environment]
+        [make_sub_menu(menu_label) for menu_label in menus_by_topic]
         pm.menuItem(parent=self.menu_flottitools, divider=True)
+        menus_by_craft = [self.animation, self.rigging, self.skinning]
+        [make_sub_menu(menu_label) for menu_label in menus_by_craft]
+        pm.menuItem(parent=self.menu_flottitools, divider=True)
+        menus_by_misc = [self.preferences]
+        [make_sub_menu(menu_label) for menu_label in menus_by_misc]
+        pm.menuItem(parent=self.menu_flottitools, divider=True)
+
 
         # Classes that inherit from MenuItem are added to menu_flotti_tools in the order that they appear in this file.
         menu_items = _get_menu_item_classes()
@@ -88,11 +106,13 @@ def _get_menu_item_names_and_classes_alphabetical():
 class MenuItem:
     parent_menu = None
     label = None
+    image = None
 
     def __init__(self, flotti_menu_instance):
-        self.label = self.label
-        parent = getattr(flotti_menu_instance, self.parent_menu)
-        pm.menuItem(parent=parent, label=self.label, command=self.command)
+        parent = flotti_menu_instance.menu_label_to_menu.get(self.parent_menu, flotti_menu_instance.menu_flottitools)
+        menu_item = pm.menuItem(parent=parent, label=self.label, command=self.command)
+        if self.image:
+            menu_item.setImage(self.image)
 
     def command(self):
         msg = 'Menu item {} has no command defined. A tech artist probably forgot to write it.'.format(self.label)
@@ -103,11 +123,18 @@ class Divider:
     parent_menu = None
 
     def __init__(self, flotti_menu_instance):
-        parent = getattr(flotti_menu_instance, self.parent_menu)
+        parent = flotti_menu_instance.menu_label_to_menu.get(self.parent_menu, flotti_menu_instance.menu_flottitools)
         pm.menuItem(parent=parent, divider=True)
 
 
 # Root menu items  -- start
+class BatchToolMenuItem(MenuItem):
+    parent_menu = FlottiToolsMenu.top_menu
+    label = "Batch Tool.."
+    
+    def command(self, *args):
+        import flottitools.batchtool.batch_tool_ui as batch_tool_ui
+        batch_tool_ui.batcher_launch()
 
 class ValidatorMenuItem(MenuItem):
     parent_menu = FlottiToolsMenu.top_menu
@@ -117,21 +144,65 @@ class ValidatorMenuItem(MenuItem):
         validator.validator_launch()
 
 
-class UninstallMenuItem(MenuItem):
+class FixPathsMenuItem(MenuItem):
     parent_menu = FlottiToolsMenu.top_menu
-    label = "Uninstall"
+    label = "Fix Paths"
 
     def command(self, *args):
-        import flottitools.drag_to_maya_scene_setup as foo
-        foo.remove_flotti_from_userprefs()
-        foo.remove_menu()
-
+        fix_paths.fix_paths()
+		
 # Root menu items  -- end
 
 
-# Rigging tools menu items  -- start
-class CopySkinMenuItem(MenuItem):
+# Character menu items  -- start
+class CharacterExporterMenuItem(MenuItem):
+    parent_menu = FlottiToolsMenu.character
+    label = "Character Exporter..."
+
+    def command(self, *args):
+        import flottitools.character.character_exporter_ui as char_exporter
+        char_exporter.character_exporter_launch()
+
+# Character menu items  -- end
+
+
+# Environment menu items  -- start
+class ExportEnvironmentMeshesMenuItem(MenuItem):
+    parent_menu = FlottiToolsMenu.environment
+    label = "Export Selected Meshes"
+
+    def command(self, *args):
+        export_env.export_selected_meshes_with_prompt()
+
+# Environment menu items  -- end
+
+
+# Animation menu items -- start
+class AnimExporterMenuItem(MenuItem):
+    parent_menu = FlottiToolsMenu.animation
+    label = "Animation Exporter.."
+
+    def command(self, *args):
+        anim_exporter_ui.anim_exporter_launch()
+
+# Animation menu items -- end
+
+
+# Rigging menu items -- start
+class OrientJointsMenuItem(MenuItem):
     parent_menu = FlottiToolsMenu.rigging
+    label = "Orient Joints.."
+
+    def command(self, *args):
+        import flottitools.rigging.orient_joints.orient_joints_ui as orient_joints_ui
+        orient_joints_ui.orient_joints_launch()
+
+# Rigging menu items -- end
+
+
+# Skinning tools menu items  -- start
+class CopySkinMenuItem(MenuItem):
+    parent_menu = FlottiToolsMenu.skinning
     label = "Copy Skin Weights..."
 
     def command(self, *args):
@@ -139,10 +210,36 @@ class CopySkinMenuItem(MenuItem):
 
 
 class AverageWeightsMenuItem(MenuItem):
-    parent_menu = FlottiToolsMenu.rigging
+    parent_menu = FlottiToolsMenu.skinning
     label = "Average Weights..."
 
     def command(self, *args):
         avgwts_ui.average_weights()
 
-# Rigging tools menu items  -- end
+
+class CreateFallbackSKWMeshMenuItem(MenuItem):
+    parent_menu = FlottiToolsMenu.skinning
+    label = "Create Merged Skinned Mesh"
+
+    def command(self, *args):
+        import flottitools.utils.skinutils as skinutils
+        skinned_meshes = skinutils.get_skinned_meshes_from_selection()
+        if not skinned_meshes:
+            skinned_meshes = skinutils.get_skinned_meshes_from_scene()
+        if not skinned_meshes:
+            pm.error('Select one or more skinned meshes to be duplicated and merged into a merged skinned mesh.')
+            return
+        print(skinutils.combine_skinned_meshes(skinned_meshes, new_name=skinutils.FALLBACK_MESH_NAME, do_duplicate=True))
+# Skinning tools menu items  -- end
+
+
+# Preferences menu items  -- start
+class UninstallMenuItem(MenuItem):
+    parent_menu = FlottiToolsMenu.preferences
+    label = "Uninstall"
+
+    def command(self, *args):
+        import flottitools.drag_to_maya_scene_setup as flotti_setup
+        flotti_setup.remove_flotti_from_userprefs()
+        flotti_setup.remove_menu()
+# Preferences menu items  -- end

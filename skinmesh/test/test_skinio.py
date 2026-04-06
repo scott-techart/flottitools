@@ -5,7 +5,7 @@ import shutil
 import pymel.core as pm
 
 import flottitools.test as mayatest
-import flottitools.skintools.skinio as skinio
+import flottitools.skinmesh.skinio as skinio
 import flottitools.utils.skinutils as skinutils
 
 

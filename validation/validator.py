@@ -1,9 +1,6 @@
 import os
 
 import pymel.core as pm
-import PySide2.QtWidgets as QtWidgets
-import PySide2.QtCore as QtCore
-import PySide2.QtGui as QtGui
 
 import flottitools.path_consts as path_consts
 import flottitools.ui as flottiui
@@ -13,6 +10,8 @@ import flottitools.utils.skinutils as skinutils
 import flottitools.validation.materials as val_mats
 import flottitools.validation.meshes as val_mesh
 import flottitools.validation.skinmesh as val_skmesh
+
+from flottitools.ui import QtWidgets, QtCore, QtGui
 
 
 VALIDATOR_UI = None
@@ -376,7 +375,8 @@ class ValidationIssueWidget(flottiui.FlottiMayaWindowDesignerUI):
         self.validator_instance = validator_instance
         self.dirty = None
         self.ui.issue_label.setText(self.description)
-        self.ui.issue_icon_label.setPixmap(self.preval_path)
+        preval_pixmap = QtGui.QPixmap(self.preval_path)
+        self.ui.issue_icon_label.setPixmap(preval_pixmap)
         self.report_widget = self.report_widget or IssueReportWidget
         self.validation_results = None
 
@@ -401,7 +401,7 @@ class ValidationIssueWidget(flottiui.FlottiMayaWindowDesignerUI):
             severity_color = SEVERITY_COLOR_MAP.get(severity, COLOR_UNKNOWN)
             self._set_buttons_color(severity_color)
             icon_path = self.severity_icon_map.get(severity, COLOR_UNKNOWN)
-            self.ui.issue_icon_label.setPixmap(icon_path)
+            self.ui.issue_icon_label.setPixmap(QtGui.QPixmap(icon_path))
             if not self.has_fix_method:
                 self.ui.issue_fix_pushButton.setEnabled(self.has_fix_method)
                 self.ui.issue_fix_pushButton.setToolTip(
@@ -410,7 +410,7 @@ class ValidationIssueWidget(flottiui.FlottiMayaWindowDesignerUI):
         else:
             self.ui.actions_enabled_hbox.setEnabled(False)
             self.dirty = False
-            self.ui.issue_icon_label.setPixmap(self.success_path)
+            self.ui.issue_icon_label.setPixmap(QtGui.QPixmap(self.success_path))
             self._set_buttons_color('green')
             if not self.has_fix_method:
                 self.ui.issue_fix_pushButton.setToolTip(None)

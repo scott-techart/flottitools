@@ -1,7 +1,7 @@
 import os
 
-import flottitools.skintools.averageweights as avgwts
-import flottitools.ui as flottiui
+import flottitools.skinmesh.averageweights.averageweights as avgwts
+import flottitools.ui as flotti_ui
 
 
 AVERAGE_WEIGHTS_UI = None
@@ -15,7 +15,7 @@ def average_weights():
     AVERAGE_WEIGHTS_UI.show()
 
 
-class AverageWeightsMayaWindow(flottiui.FlottiMayaWindowDesignerUI):
+class AverageWeightsMayaWindow(flotti_ui.FlottiMayaWindowDesignerUI):
     window_title = "Average Weights"
     ui_designer_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'averageweights.ui'))
 

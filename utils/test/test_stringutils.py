@@ -1,6 +1,6 @@
 import unittest
 
-import SSEMaya.Utilities.stringutils as stringutils
+import flottitools.utils.stringutils as stringutils
 
 
 class TestReplaceAppendSuffix(unittest.TestCase):

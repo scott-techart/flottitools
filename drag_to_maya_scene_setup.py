@@ -1,10 +1,11 @@
+from pathlib import Path
 import os
 import stat
+import subprocess
 import sys
 
 import maya.cmds as cmds
 import maya.mel as mel
-import pymel.core as pm
 
 FLOTTI_ARTTOOLS_VERSION = 'v1.0'
 FLOTTI_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -19,14 +20,15 @@ def onMayaDroppedPythonFile(*args):
 
 
 def setup_flottitools():
-    make_flottitools_shelf()
+    # make_flottitools_shelf()
+    install_dependencies()
     usersetup_path = get_maya_usersetup_path()
     usersetup_lines = get_usersetup_lines()
     inject_flottisetup_to_maya_usersetup(usersetup_path, usersetup_lines)
 
     if FLOTTI_DIR not in sys.path:
-        sys.path.append(r'D:/git_repos')
-    remove_menu()
+        sys.path.append(FLOTTI_DIR)
+    # remove_menu()
     import maya.utils as mayautils
     mayautils.executeDeferred('import flottitools; flottitools.load_flotti_tools()')
 
@@ -45,7 +47,7 @@ def make_flottitools_shelf():
         flottitools_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
         button_cmd = 'import sys\n'
         button_cmd += 'if \'{0}\' not in sys.path: sys.path.append(\'{0}\')\n'.format(flottitools_dir)
-        button_cmd += 'import flottitools.ui.averageweights_ui as avgwtsui\n'
+        button_cmd += 'import flottitools.skinmesh.averageweights.averageweights_ui as avgwtsui\n'
         button_cmd += 'avgwtsui.average_weights()'
 
         icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'ui', 'averageweights_icon.png'))
@@ -160,6 +162,24 @@ def remove_flotti_from_userprefs():
 
 
 def remove_menu():
+    import pymel.core as pm
     import flottitools.menu as flotti_menu
     if pm.menu(flotti_menu.FlottiToolsMenu.top_menu_name, exists=True):
         pm.deleteUI(flotti_menu.FlottiToolsMenu.top_menu_name)
+def install_dependencies():
+    """
+    PyMel is no longer bundled with Maya.
+    Autodesk's documentation recommends slightly different pip install package names older versions of Maya.
+    Maya2023: https://help.autodesk.com/view/MAYAUL/2023/ENU/?guid=GUID-2AA5EFCE-53B1-46A0-8E43-4CD0B2C72FB4
+    Maya2024: https://help.autodesk.com/view/MAYAUL/2024/ENU/?guid=GUID-2AA5EFCE-53B1-46A0-8E43-4CD0B2C72FB4
+    """
+    try:
+        import pymel.core as pm
+    except ModuleNotFoundError:
+        pymel_package_name = 'pymel'
+        maya_version = cmds.about(version=True)
+        if maya_version == '2023':
+            pymel_package_name = 'pymel>=1.3.*,<1.4.*'
+        maya_exe = Path(sys.executable)
+        mayapy_exe = maya_exe.parent.joinpath('mayapy.exe')
+        subprocess.check_call([mayapy_exe, "-m", "pip", "install", pymel_package_name])

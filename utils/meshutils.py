@@ -3,6 +3,8 @@ import pymel.core as pm
 
 import flottitools.utils.openmayautils as omutils
 
+
+MESH_SUFFIX = '_MESH'
 NO_VERTEX_COLOR = om.MColor((-1, -1, -1, -1))
 
 
@@ -189,3 +191,34 @@ def get_mesh_pairs_by_name(meshes_a, meshes_b):
                 meshes_b_copy.pop(i)
                 continue
     return pairs
+
+
+def get_mesh_pairs_by_name_with_fallback(source_meshes, target_meshes, fallback_mesh_name='fallback'):
+    source_names_lower = []
+    source_names_long_lower = []
+    for source_mesh in source_meshes:
+        source_names_lower.append(source_mesh.nodeName(stripNamespace=True).lower())
+        source_names_long_lower.append(source_mesh.name(stripNamespace=True).lower())
+    fallback_mesh = source_meshes[0]
+    if fallback_mesh_name.lower() in source_names_lower:
+        index = source_names_lower.index(fallback_mesh_name.lower())
+        fallback_mesh = source_meshes[index]
+    mesh_pairs = []
+    for target_mesh in target_meshes:
+        target_name_lower = target_mesh.nodeName(stripNamespace=True).lower()
+        source_count = source_names_lower.count(target_name_lower)
+        source_mesh = fallback_mesh
+        if source_count > 0:
+            if source_count == 1:
+                index = source_names_lower.index(target_name_lower)
+                source_mesh = source_meshes[index]
+            else:
+                target_long_name_lower = target_mesh.name(stripNamespace=True).lower()
+                try:
+                    index = source_names_long_lower.index(target_long_name_lower)
+                    source_mesh = source_meshes[index]
+                except ValueError:
+                    pass
+        mesh_pairs.append((source_mesh, target_mesh))
+    return mesh_pairs
+            

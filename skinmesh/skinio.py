@@ -1,11 +1,15 @@
 import os
+from pathlib import Path
 
 import pymel.core as pm
 
+import flottitools.utils.ioutils as ioutils
 import flottitools.utils.meshutils as meshutils
 import flottitools.utils.namespaceutils as nsutils
+import flottitools.utils.pathutils as pathutils
 import flottitools.utils.selectionutils as selutils
 import flottitools.utils.skinutils as skinutils
+import flottitools.utils.transformutils as transformutils
 
 
 NAMESPACE_SKINCOPY_EXPORT = 'FlottiCopySkinWeightsExport'
@@ -57,7 +61,9 @@ def import_skinning_on_meshes_in_scene(skinweights_path, copy_weights_method=Non
 
 def import_skinning_on_meshes(target_meshes, skinweights_path, copy_weights_method=None,
                               go_to_bindpose=True, bind_unskinned=True, get_mesh_pairs_method=None):
-    get_mesh_pairs_method = get_mesh_pairs_method or meshutils.get_mesh_pairs_by_name
+    def default_get_mesh_pairs(source_sk_meshes, target_sk_meshes):
+        return meshutils.get_mesh_pairs_by_name_with_fallback(source_sk_meshes, target_sk_meshes, fallback_mesh_name=skinutils.FALLBACK_MESH_NAME)
+    get_mesh_pairs_method = get_mesh_pairs_method or default_get_mesh_pairs
     scene_joints = None
     if bind_unskinned:
         scene_joints = pm.ls(type=pm.nt.Joint)
@@ -81,10 +87,11 @@ def import_skinning_on_meshes(target_meshes, skinweights_path, copy_weights_meth
                 if not skinutils.get_skincluster(target_mesh):
                     skinutils.bind_mesh_to_similar_joints(source_skinned_mesh, target_mesh, target_joints=scene_joints)
             # if copy_weights_method is None then best guess which weight copy method to use
-            print('Copying skinning from mesh: {0} to mesh: {1}'.format(source_skinned_mesh.nodeName(),
-                                                                        target_mesh.nodeName()))
             do_copy_weights_methods = copy_weights_method or _get_best_guess_copy_weights_method(source_skinned_mesh,
                                                                                                  target_mesh)
+            print('Copying skinning using method {0} from mesh: {1} to mesh: {2}'.format(do_copy_weights_methods.__name__, 
+                                                                                         source_skinned_mesh.nodeName(),
+                                                                                         target_mesh.nodeName()))
             do_copy_weights_methods(source_skinned_mesh, target_mesh)
         import_namespace.remove()
         # evaluate all nodes

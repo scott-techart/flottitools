@@ -2,12 +2,13 @@ import os
 import stat
 
 import pymel.core as pm
-import maya.cmds as cmds
 
 import flottitools.path_consts as path_consts
 import flottitools.utils.pathutils as pathutils
 
 
+def get_save_as_ma_path_from_dialogue(start_dir=None):
+    return get_save_as_path_from_dialogue(start_dir=start_dir, file_filter="Maya Files (*.ma);;Maya ASCII (*.ma)")
 def get_destination_ma_path_from_dialogue(start_dir=None, file_mode=0):
     start_dir = start_dir or path_consts.FLOTTITOOLS_DIR
     try:
@@ -18,6 +19,12 @@ def get_destination_ma_path_from_dialogue(start_dir=None, file_mode=0):
         return
 
 
+def get_save_as_fbx_path_from_dialogue(start_dir=None):
+    return get_save_as_path_from_dialogue(start_dir=start_dir, file_filter='FBX Files (*.fbx)')
+
+
+def get_save_as_path_from_dialogue(start_dir=None, file_filter=''):
+    return get_path_from_dialogue(start_dir=start_dir, file_filter=file_filter, file_mode=0)
 def get_fbx_path_from_dialogue(start_dir=None, file_mode=1):
     start_dir = start_dir or path_consts.FLOTTITOOLS_DIR
     try:
@@ -26,6 +33,19 @@ def get_fbx_path_from_dialogue(start_dir=None, file_mode=1):
                               startingDirectory=start_dir)[0]
     except IndexError:
         return
+
+def get_path_from_dialogue(start_dir=None, file_filter='', file_mode=0):
+    start_dir = start_dir or path_consts.FLOTTITOOLS_DIR
+    try:
+        return pm.fileDialog2(fileMode=file_mode,
+                              fileFilter=file_filter,
+                              startingDirectory=start_dir)[0]
+    except (TypeError, IndexError):
+        return
+
+
+def get_dir_path_from_dialogue(start_dir=None, file_filter=''):
+    return get_path_from_dialogue(start_dir=start_dir, file_filter=file_filter, file_mode=2)
 
 
 def ensure_file_is_writable(path):

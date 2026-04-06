@@ -17,6 +17,7 @@ DEFAULT_SKINCLUSTER_KWARGS = {'bindMethod': 0,
                               'obeyMaxInfluences': True,
                               'dropoffRate': 4,
                               'removeUnusedInfluence': False}
+FALLBACK_MESH_NAME = 'fallback{}'.format(meshutils.MESH_SUFFIX)
 
 
 def get_skincluster(pynode):
@@ -685,3 +686,23 @@ def is_not_skinned(node):
     if get_skincluster(node):
         return False
     return True
+
+
+def combine_skinned_meshes(meshes, new_name=None, do_duplicate=True):
+    new_name = new_name or meshes[0].nodeName(stripNamespace=True)
+    meshes_to_combine = meshes
+    with selutils.preserve_selection():
+        if do_duplicate:
+            meshes_to_combine = pm.duplicate(meshes)
+            pm.select(meshes_to_combine, r=True)
+            trash_node = pm.group(name='trash_node')
+            for source_mesh, dup_mesh in zip(meshes, meshes_to_combine):
+                target_skincluster = bind_mesh_like_mesh(source_mesh, dup_mesh)
+                copy_weights_vert_order_inf_order(source_mesh, dup_mesh, target_skincluster=target_skincluster)
+        new_mesh_name, new_skincl_name = pm.polyUniteSkinned(meshes_to_combine, constructionHistory=False, mergeUVSets=True, centerPivot=False)
+        new_mesh, new_skincl = [pm.PyNode(n) for n in [new_mesh_name, new_skincl_name]]
+        new_mesh.rename(new_name)
+        new_parent = meshes[0].getAllParents()[-1]        
+        new_mesh.setParent(new_parent)
+        pm.delete(trash_node)
+    return new_mesh, new_skincl

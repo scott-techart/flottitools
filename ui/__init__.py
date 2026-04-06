@@ -1,11 +1,21 @@
 import os
 
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
+import maya.OpenMayaUI as old_omui
 import pymel.core as pm
-import PySide2.QtCore as QtCore
-import PySide2.QtGui as QtGui
-import PySide2.QtUiTools as QtUiTools
-import PySide2.QtWidgets as QtWidgets
+
+try:
+  import PySide6.QtCore as QtCore
+  import PySide6.QtGui as QtGui
+  import PySide6.QtUiTools as QtUiTools
+  import PySide6.QtWidgets as QtWidgets
+  from shiboken6 import wrapInstance
+except ImportError:
+  import PySide2.QtCore as QtCore
+  import PySide2.QtGui as QtGui
+  import PySide2.QtUiTools as QtUiTools
+  import PySide2.QtWidgets as QtWidgets
+  from shiboken2 import wrapInstance
 
 import flottitools.path_consts as path_consts
 
@@ -17,9 +27,22 @@ DONT_SAVE_STRING = "Don't Save"
 RED_LABEL_CS_STRING = "QLabel{ color: rgb(255, 50, 50); }"
 GREEN_LABEL_CS_STRING = "QLabel{ color: rgb(50, 255, 50); }"
 
+COLOR_PRIMARY = "#0a7a80"
+COLOR_SECONDARY = "#e5e5e5"
+COLOR_BACKGROUND = "#000000"
+
+COLOR_ERROR = 'maroon'
+COLOR_WARNING = 'darkgoldenrod'
+COLOR_PASS = 'green'
+COLOR_UNKNOWN = 'indigo'
+COLOR_BG_CS_STRING_ERROR = "background-color: {}".format(COLOR_ERROR)
+COLOR_BG_CS_STRING_WARNING = "background-color: {}".format(COLOR_WARNING)
+COLOR_BG_CS_STRING_PASS = "background-color: {}".format(COLOR_PASS)
+COLOR_BG_CS_STRING_UNKNOWN = "background-color: {}".format(COLOR_UNKNOWN)
+
 
 class FlottiWindow(QtWidgets.QDialog):
-    window_title = "SSE Window"
+    window_title = "FlottiTools Window"
     object_name = None
 
     def __init__(self, parent=None):
@@ -53,16 +76,12 @@ class FlottiWindowDesignerUI(FlottiWindow):
         super(FlottiWindowDesignerUI, self).__init__(parent=parent)
         if self.ui_designer_file_path is None:
             raise NotImplementedError()
-        loader = QtUiTools.QUiLoader()
-        uifile = QtCore.QFile(self.ui_designer_file_path)
-        uifile.open(QtCore.QFile.ReadOnly)
-        self.ui = loader.load(uifile)
-        uifile.close()
+        self.ui = load_qt_ui_from_path(self.ui_designer_file_path)
 
         self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().addWidget(self.ui)
         # set window to minimize size when it launches
-        self.resize(0, 0)
+        # self.resize(0, 0)
 
 
 class FlottiMayaWindowDesignerUI(MayaQWidgetDockableMixin, FlottiWindowDesignerUI):
@@ -266,9 +285,27 @@ def unsaved_changes_prompt():
     return False
 
 
-
 class RefreshButton(QtWidgets.QPushButton):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         refresh_icon = QtGui.QPixmap(os.path.join(path_consts.ICONS_DIR, 'refresh.svg'))
         self.setIcon(refresh_icon)
+
+
+def load_qt_ui_from_path(path):
+    abs_path = os.path.abspath(path)
+    loader = QtUiTools.QUiLoader()
+    uifile = QtCore.QFile(abs_path)
+    uifile.open(QtCore.QFile.ReadOnly)
+    ui = loader.load(uifile)
+    uifile.close()
+    return ui
+
+
+def maya_main_window() -> object:
+    main_window_ptr = old_omui.MQtUtil.mainWindow()
+    return wrapInstance(int(main_window_ptr), QtWidgets.QWidget)
+
+
+def maya_workspace_widget() -> QtWidgets.QWidget:  # Maya's top right workspace widget
+    return maya_main_window().findChild(QtWidgets.QWidget, name="workspaceSelectorLayout")

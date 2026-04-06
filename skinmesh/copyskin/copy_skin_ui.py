@@ -1,13 +1,13 @@
 import os
 
 import pymel.core as pm
-import PySide2.QtWidgets as QtWidgets
-import PySide2.QtGui as QtGui
 
 import flottitools.ui as flottiui
 import flottitools.utils.skinutils as skinutils
 import flottitools.utils.skeletonutils as skelutils
 
+QtWidgets = flottiui.QtWidgets
+QtGui = flottiui.QtGui
 
 COPYSKIN_UI = None
 
